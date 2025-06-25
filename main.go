@@ -27,6 +27,9 @@ import (
 // bw6_761 curve identifier for gnark
 var bw6_761_ID = ecc.BW6_761
 
+// Add this constant at the top of the file (after imports):
+var bw6761FieldModulus, _ = new(big.Int).SetString("25825498287723658482388010152637314622996459424634738912356717273388820575973", 10)
+
 // =============================================================================
 // DATA STRUCTURES
 // =============================================================================
@@ -80,56 +83,60 @@ type CircuitTx struct {
 
 // Define implements the zero-knowledge proof constraints for the transaction circuit
 func (c *CircuitTx) Define(api frontend.API) error {
-	// 1. Verify old note commitment: cmOld = MiMC(coins, energy, rho, rand)
-	hasher, _ := mimc.NewMiMC(api)
-	hasher.Reset()
-	hasher.Write(c.OldCoin)
-	hasher.Write(c.OldEnergy)
-	hasher.Write(c.RhoOld)
-	hasher.Write(c.RandOld)
-	cm := hasher.Sum()
-	api.AssertIsEqual(c.CmOld, cm)
+	// === Transfer subroutine (Algorithm 1, paper) ===
 
-	// 2. Verify old note serial number: snOld = MiMC(sk, rho) (PRF)
+	// Step 1: Serial number (snOld = PRF(skOld, rhoOld))
 	snComputed := PRF(api, c.SkOld, c.RhoOld)
 	api.AssertIsEqual(c.SnOld, snComputed)
 
-	// 3. Verify new note commitment: cmNew = MiMC(coins, energy, rho, rand)
+	// Step 2: rhoNew = H(snOld) - hash the serial number computed in Step 1
+	hasher, _ := mimc.NewMiMC(api)
+	hasher.Write(snComputed) // Use the computed serial number, not the input
+	rhoNewComputed := hasher.Sum()
+	api.AssertIsEqual(c.RhoNew, rhoNewComputed)
+
+	// Step 3: randNew is sampled randomly in Go (not a circuit constraint)
+
+	// Step 4: Commitment (cmNew = Com(coins, energy, rhoNew, randNew))
 	hasher.Reset()
 	hasher.Write(c.NewCoin)
 	hasher.Write(c.NewEnergy)
 	hasher.Write(c.RhoNew)
 	hasher.Write(c.RandNew)
-	cm = hasher.Sum()
-	api.AssertIsEqual(c.CmNew, cm)
+	cmNewComputed := hasher.Sum()
+	api.AssertIsEqual(c.CmNew, cmNewComputed)
 
-	// 4. Verify encrypted new note data: cNew = Enc(pk, coins, energy, rho, rand, cm)
+	// Step 5: (Build new note structure is implicit in witness, not a circuit constraint)
+
+	// Step 6: Encryption (cNew = Enc(pkNew, coins, energy, rhoNew, randNew, cmNew, encKey))
 	encVal := EncZK(api, c.PkNew, c.NewCoin, c.NewEnergy, c.RhoNew, c.RandNew, c.CmNew, c.EncKey)
 	for i := 0; i < 6; i++ {
 		api.AssertIsEqual(c.CNew[i], encVal[i])
 	}
 
-	// 5. Verify value conservation (no coins/energy created or destroyed)
+	// Step 7: Value conservation (OldCoin == NewCoin, OldEnergy == NewEnergy)
 	api.AssertIsEqual(c.OldCoin, c.NewCoin)
 	api.AssertIsEqual(c.OldEnergy, c.NewEnergy)
 
-	// 6. Verify encryption key derivation: EncKey = (G^b)^r
+	// === Auxiliary checks (not part of Transfer, but required for full ZKP) ===
+
+	// Key derivations for encryption
+	// EncKey = (G_b)^r
 	G_r_b := new(sw_bls12377.G1Affine)
 	G_r_b.ScalarMul(api, c.G_b, c.R)
 	api.AssertIsEqual(c.EncKey.X, G_r_b.X)
 	api.AssertIsEqual(c.EncKey.Y, G_r_b.Y)
-
-	// 7. Verify G_r = G^r
+	// G_r = G^r
 	G_r := new(sw_bls12377.G1Affine)
 	G_r.ScalarMul(api, c.G, c.R)
 	api.AssertIsEqual(c.G_r.X, G_r.X)
 	api.AssertIsEqual(c.G_r.Y, G_r.Y)
 
-	// 8. Verify public key derivation: pk = MiMC(sk)
+	// Public key derivation (pkOld = H(skOld))
 	hasher.Reset()
 	hasher.Write(c.SkOld)
-	pk := hasher.Sum()
-	api.AssertIsEqual(c.PkOld, pk)
+	pkOldComputed := hasher.Sum()
+	api.AssertIsEqual(c.PkOld, pkOldComputed)
 
 	return nil
 }
@@ -312,6 +319,16 @@ func CreateNote(coins, energy *big.Int, sk []byte) *Note {
 	}
 }
 
+// Helper to ensure 32-byte big-endian encoding for random field elements
+func padTo32Bytes(b []byte) []byte {
+	if len(b) >= 32 {
+		return b[len(b)-32:]
+	}
+	padded := make([]byte, 32)
+	copy(padded[32-len(b):], b)
+	return padded
+}
+
 // Algorithm1 implements the confidential transaction as in the paper (Algorithm 1), for 1 input and 1 output
 func Algorithm1() ([]byte, []byte, [6]bls12377_fp.Element, groth16.Proof) {
 	coins := randomBigInt(32)
@@ -319,49 +336,76 @@ func Algorithm1() ([]byte, []byte, [6]bls12377_fp.Element, groth16.Proof) {
 	oldSk := randomBytes(32)
 	newSk := randomBytes(32)
 	oldNote := CreateNote(coins, energy, oldSk)
-	newNote := CreateNote(coins, energy, newSk)
-
+	// Step 1: Compute serial number for old note
 	snOldBytes := CalcSerialMimc(oldSk, oldNote.Rho)
 	snOldStr := new(big.Int).SetBytes(snOldBytes).String()
+	// Step 2: Compute rhoNew as MiMC(snOldFieldBytes) (faithful to paper)
+	snOldField := new(big.Int)
+	snOldField.SetString(snOldStr, 10)
 
+	// hasher, _ := mimc.NewMiMC(api)
+	// hasher.Write(c.SnOld)
+	// rhoNewComputed := hasher.Sum()
+	// api.AssertIsEqual(c.RhoNew, rhoNewComputed)
+
+	rhoNew := mimcHash(snOldBytes)
+	// Step 3: Generate randomness for new note
+	randNew := padTo32Bytes(randomBytes(32))
+	// Step 4: Compute pk for new note
+	pkNew := mimcHash(newSk)
+	// Step 5: Compute commitment for new note
+	cmNew := Commitment(
+		coins,
+		energy,
+		new(big.Int).SetBytes(rhoNew),
+		new(big.Int).SetBytes(randNew),
+	)
+	// Step 6: Build new note
+	newNote := &Note{
+		Value: Gamma{
+			Coins:  coins,
+			Energy: energy,
+		},
+		PkOwner: pkNew,
+		Rho:     rhoNew,
+		Rand:    randNew,
+		Cm:      cmNew,
+	}
+	// Step 7: Set up EC points for encryption
 	var g1Jac, _, _, _ = bls12377.Generators()
 	var g, g_b, g_r, encKey bls12377.G1Affine
 	var b, r bls12377_fp.Element
-
 	bSeed := randomBytes(32)
 	bHash := mimcHash(bSeed)
 	bBig := new(big.Int).SetBytes(bHash)
 	bBig.Mod(bBig, bls12377_fr.Modulus())
 	b.SetBigInt(bBig)
-
 	rSeed := randomBytes(32)
 	rHash := mimcHash(rSeed)
 	rBig := new(big.Int).SetBytes(rHash)
 	rBig.Mod(rBig, bls12377_fr.Modulus())
 	r.SetBigInt(rBig)
-
 	g.FromJacobian(&g1Jac)
 	g_b.ScalarMultiplication(&g, b.BigInt(new(big.Int)))
 	g_r.ScalarMultiplication(&g, r.BigInt(new(big.Int)))
 	encKey.ScalarMultiplication(&g_b, r.BigInt(new(big.Int)))
-
+	// Step 8: Encrypt new note data
 	encVals := BuildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	var cNewStrs [6]string
 	for i := 0; i < 6; i++ {
 		cNewStrs[i] = encVals[i].String()
 	}
-
 	var cNewVars [6]frontend.Variable
 	for i := 0; i < 6; i++ {
 		cNewVars[i] = cNewStrs[i]
 	}
-
+	// Step 9: Build witness for the circuit
 	witness := &CircuitTx{
 		OldCoin:   oldNote.Value.Coins.String(),
 		OldEnergy: oldNote.Value.Energy.String(),
 		CmOld:     new(big.Int).SetBytes(oldNote.Cm).String(),
-		SnOld:     snOldStr,
+		SnOld:     new(big.Int).SetBytes(snOldBytes).String(),
 		PkOld:     new(big.Int).SetBytes(oldNote.PkOwner).String(),
 		NewCoin:   newNote.Value.Coins.String(),
 		NewEnergy: newNote.Value.Energy.String(),
@@ -379,37 +423,30 @@ func Algorithm1() ([]byte, []byte, [6]bls12377_fp.Element, groth16.Proof) {
 		R:         r.String(),
 		EncKey:    toGnarkPoint(encKey),
 	}
-
 	var circuit CircuitTx
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
 		panic(fmt.Errorf("circuit compilation failed: %w", err))
 	}
-
 	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
 		panic(fmt.Errorf("groth16 setup failed: %w", err))
 	}
-
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		panic(fmt.Errorf("witness creation failed: %w", err))
 	}
-
 	proofObj, err := groth16.Prove(ccs, pk, w)
 	if err != nil {
 		panic(fmt.Errorf("proof generation failed: %w", err))
 	}
-
 	publicWitness, err := w.Public()
 	if err != nil {
 		panic(fmt.Errorf("public witness extraction failed: %w", err))
 	}
-
 	if err := groth16.Verify(proofObj, vk, publicWitness); err != nil {
 		panic(fmt.Errorf("proof verification failed: %w", err))
 	}
-
 	var algProofBytes []byte
 	buf := new(bytes.Buffer)
 	_, err = proofObj.WriteTo(buf)
@@ -417,13 +454,11 @@ func Algorithm1() ([]byte, []byte, [6]bls12377_fp.Element, groth16.Proof) {
 		panic(fmt.Errorf("proof marshaling failed: %w", err))
 	}
 	algProofBytes = buf.Bytes()
-
 	fmt.Println("\n[Algorithm1] Transaction generated:")
 	fmt.Printf("  snOld: %s\n", snOldStr)
 	fmt.Printf("  cmNew: %s\n", new(big.Int).SetBytes(newNote.Cm).String())
 	fmt.Printf("  cNew:  %v\n", cNewStrs)
 	fmt.Printf("  proof: %x...\n", algProofBytes[:8])
-
 	return snOldBytes, newNote.Cm, encVals, proofObj
 }
 
@@ -462,8 +497,23 @@ func main() {
 	snOld := CalcSerialMimc(oldSk, oldNote.Rho)
 	fmt.Printf("Serial number computed: %x\n", snOld[:8])
 
-	// Step 3: Set up elliptic curve points for encryption
-	fmt.Println("\n3. Setting up encryption parameters...")
+	// Step 3: Compute rhoNew as H(snOld) according to the algorithm
+	fmt.Println("\n3. Computing rhoNew...")
+	rhoNew := mimcHash(snOld)
+	fmt.Printf("rhoNew computed: %x\n", rhoNew[:8])
+
+	// Update the newNote with the correct rhoNew
+	newNote.Rho = rhoNew
+	// Recompute the commitment for the new note with the correct rhoNew
+	newNote.Cm = Commitment(
+		newNote.Value.Coins,
+		newNote.Value.Energy,
+		new(big.Int).SetBytes(newNote.Rho),
+		new(big.Int).SetBytes(newNote.Rand),
+	)
+
+	// Step 4: Set up elliptic curve points for encryption
+	fmt.Println("\n4. Setting up encryption parameters...")
 	var g1Jac, _, _, _ = bls12377.Generators()
 	var g, g_b, g_r, encKey bls12377.G1Affine
 	var b, r bls12377_fp.Element
@@ -496,14 +546,14 @@ func main() {
 	fmt.Printf("[DEBUG] Go encKey.X: %s\n", encKey.X.String())
 	fmt.Printf("[DEBUG] Go encKey.Y: %s\n", encKey.Y.String())
 
-	// Step 4: Encrypt new note data
-	fmt.Println("\n4. Encrypting new note data...")
+	// Step 5: Encrypt new note data
+	fmt.Println("\n5. Encrypting new note data...")
 	encVals := BuildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	fmt.Println("New note data encrypted successfully")
 
-	// Step 5: Create witness for the circuit
-	fmt.Println("\n5. Creating circuit witness...")
+	// Step 6: Create witness for the circuit
+	fmt.Println("\n6. Creating circuit witness...")
 	witness := &CircuitTx{
 		// Public inputs
 		OldCoin:   oldNote.Value.Coins.String(),
@@ -554,8 +604,8 @@ func main() {
 	fmt.Printf("[DEBUG] Witness EncKey.Y: %s\n", witness.EncKey.Y)
 	os.Stdout.Sync()
 
-	// Step 6: Compile the circuit
-	fmt.Println("\n6. Compiling circuit...")
+	// Step 7: Compile the circuit
+	fmt.Println("\n7. Compiling circuit...")
 	var circuit CircuitTx
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
@@ -563,16 +613,16 @@ func main() {
 	}
 	fmt.Printf("Circuit compiled successfully. Constraints: %d\n", ccs.GetNbConstraints())
 
-	// Step 7: Generate proving and verifying keys
-	fmt.Println("\n7. Generating proving and verifying keys...")
+	// Step 8: Generate proving and verifying keys
+	fmt.Println("\n8. Generating proving and verifying keys...")
 	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
 		panic(fmt.Errorf("groth16 setup failed: %w", err))
 	}
 	fmt.Println("Keys generated successfully")
 
-	// Step 8: Create witness and generate proof
-	fmt.Println("\n8. Generating zero-knowledge proof...")
+	// Step 9: Create witness and generate proof
+	fmt.Println("\n9. Generating zero-knowledge proof...")
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		panic(fmt.Errorf("witness creation failed: %w", err))
@@ -584,8 +634,8 @@ func main() {
 	}
 	fmt.Println("Zero-knowledge proof generated successfully")
 
-	// Step 9: Verify the proof
-	fmt.Println("\n9. Verifying proof...")
+	// Step 10: Verify the proof
+	fmt.Println("\n10. Verifying proof...")
 	publicWitness, err := w.Public()
 	if err != nil {
 		panic(fmt.Errorf("public witness extraction failed: %w", err))
