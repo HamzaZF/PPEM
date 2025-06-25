@@ -1,0 +1,7 @@
+[90m23:17:22[0m [32mINF[0m [1mcompiling circuit[0m
+[90m23:17:22[0m [32mINF[0m [1mparsed circuit inputs[0m [36mnbPublic=[0m20 [36mnbSecret=[0m9
+[90m23:17:22[0m [32mINF[0m [1mbuilding constraint builder[0m [36mnbConstraints=[0m10171
+[90m23:17:30[0m [32mINF[0m [1mcompiling circuit[0m
+[90m23:17:30[0m [32mINF[0m [1mparsed circuit inputs[0m [36mnbPublic=[0m20 [36mnbSecret=[0m9
+[90m23:17:30[0m [32mINF[0m [1mbuilding constraint builder[0m [36mnbConstraints=[0m10171
+[90m23:17:30[0m DBG verifier done [36mbackend=[0mgroth16 [36mcurve=[0mbw6_761 [36mtook=[0m6.4628

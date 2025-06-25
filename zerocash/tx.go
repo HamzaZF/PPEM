@@ -1,3 +1,10 @@
+// tx.go - Transaction logic and zero-knowledge proof integration for the zerocash protocol.
+//
+// Implements confidential transaction creation, proof generation/verification, and note encryption.
+// All cryptographic operations use secure randomness and are designed for unlinkability and confidentiality.
+//
+// WARNING: All cryptographic operations must use secure randomness and constant-time primitives where possible.
+
 package zerocash
 
 import (
@@ -18,12 +25,12 @@ import (
 	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
 )
 
-// Tx represents a Zerocash-like transaction
-// (old note, new note, ZKP, public inputs, etc.)
+// Tx represents a Zerocash-like transaction.
+// Contains old/new notes, ZKP proof, and all public inputs for verification.
 type Tx struct {
-	OldNote *Note
-	NewNote *Note
-	Proof   []byte // ZKP proof (opaque)
+	OldNote *Note  // The note being spent
+	NewNote *Note  // The note being created
+	Proof   []byte // ZKP proof (opaque, Groth16)
 	// Public inputs for verification
 	OldCoin   string
 	OldEnergy string
@@ -39,7 +46,13 @@ type Tx struct {
 	G_r       sw_bls12377.G1Affine
 }
 
-// CreateTx creates a new transaction from an old note and new owner
+// CreateTx creates a new confidential transaction from an old note and a new owner.
+// Steps:
+//  1. Compute serial number for old note (prevents double-spending)
+//  2. Generate new note for the recipient (with new randomness)
+//  3. Encrypt new note fields for the recipient
+//  4. Build ZKP witness and generate Groth16 proof
+//  5. Return the transaction object
 func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params *Params, pk groth16.ProvingKey) (*Tx, error) {
 	// Step 1: Compute serial number for old note
 	h := mimcNative.NewMiMC()
@@ -71,7 +84,7 @@ func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params
 		Cm:      cmNew,
 	}
 
-	// Step 7: Set up EC points for encryption
+	// Step 7: Set up EC points for encryption (BLS12-377)
 	var g1Jac, _, _, _ = bls12377.Generators()
 	var g, g_b, g_r, encKey bls12377.G1Affine
 	var b, r bls12377_fp.Element
@@ -90,7 +103,7 @@ func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params
 	g_r.ScalarMultiplication(&g, r.BigInt(new(big.Int)))
 	encKey.ScalarMultiplication(&g_b, r.BigInt(new(big.Int)))
 
-	// Step 8: Encrypt new note data
+	// Step 8: Encrypt new note data (see buildEncMimc)
 	encVals := buildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	var cNewStrs [6]string
@@ -125,7 +138,7 @@ func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params
 		EncKey:  toGnarkPoint(encKey),
 	}
 
-	// Step 10: Compile the circuit
+	// Step 10: Compile the circuit (Groth16, BW6-761)
 	var circuit CircuitTx
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
@@ -169,7 +182,13 @@ func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params
 	}, nil
 }
 
-// VerifyTx verifies a Zerocash-like transaction
+// VerifyTx verifies a Zerocash-like transaction.
+// Steps:
+//  1. Rebuild the circuit and public witness
+//  2. Unmarshal the proof
+//  3. Verify the Groth16 proof
+//
+// Returns an error if verification fails.
 func VerifyTx(tx *Tx, params *Params, vk groth16.VerifyingKey) error {
 	// Step 1: Rebuild the circuit and public witness
 	var circuit CircuitTx
@@ -215,7 +234,8 @@ func VerifyTx(tx *Tx, params *Params, vk groth16.VerifyingKey) error {
 	return nil
 }
 
-// buildEncMimc encrypts note data using MiMC and the encryption key
+// buildEncMimc encrypts note data using MiMC and the encryption key.
+// Returns an array of BLS12-377 field elements (for use in the circuit).
 func buildEncMimc(encKey bls12377.G1Affine, pk []byte, coins, energy, rho, rand *big.Int, cm []byte) [6]bls12377_fp.Element {
 	pk_int := new(big.Int).SetBytes(pk[:])
 	h := mimcNative.NewMiMC()
@@ -271,7 +291,7 @@ func buildEncMimc(encKey bls12377.G1Affine, pk []byte, coins, energy, rho, rand 
 	return [6]bls12377_fp.Element{*pk_enc, *coins_enc, *energy_enc, *rho_enc, *rand_enc, *cm_enc}
 }
 
-// toGnarkPoint converts a native BLS12-377 point to gnark format
+// toGnarkPoint converts a native BLS12-377 point to gnark format.
 func toGnarkPoint(p bls12377.G1Affine) sw_bls12377.G1Affine {
 	xBytes := p.X.Bytes()
 	yBytes := p.Y.Bytes()
@@ -281,7 +301,7 @@ func toGnarkPoint(p bls12377.G1Affine) sw_bls12377.G1Affine {
 	}
 }
 
-// SaveProvingKey saves a Groth16 proving key to disk
+// SaveProvingKey saves a Groth16 proving key to disk.
 func SaveProvingKey(path string, pk groth16.ProvingKey) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -292,7 +312,7 @@ func SaveProvingKey(path string, pk groth16.ProvingKey) error {
 	return err
 }
 
-// SaveVerifyingKey saves a Groth16 verifying key to disk
+// SaveVerifyingKey saves a Groth16 verifying key to disk.
 func SaveVerifyingKey(path string, vk groth16.VerifyingKey) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -303,7 +323,7 @@ func SaveVerifyingKey(path string, vk groth16.VerifyingKey) error {
 	return err
 }
 
-// LoadProvingKey loads a Groth16 proving key from disk
+// LoadProvingKey loads a Groth16 proving key from disk.
 func LoadProvingKey(path string) (groth16.ProvingKey, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -315,7 +335,7 @@ func LoadProvingKey(path string) (groth16.ProvingKey, error) {
 	return pk, err
 }
 
-// LoadVerifyingKey loads a Groth16 verifying key from disk
+// LoadVerifyingKey loads a Groth16 verifying key from disk.
 func LoadVerifyingKey(path string) (groth16.VerifyingKey, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -327,7 +347,8 @@ func LoadVerifyingKey(path string) (groth16.VerifyingKey, error) {
 	return vk, err
 }
 
-// SetupOrLoadKeys generates or loads Groth16 keys for the circuit
+// SetupOrLoadKeys generates or loads Groth16 keys for the circuit.
+// If keys exist on disk, loads them; otherwise, generates and saves new keys.
 func SetupOrLoadKeys(ccs constraint.ConstraintSystem, pkPath, vkPath string) (groth16.ProvingKey, groth16.VerifyingKey, error) {
 	pk, pkErr := LoadProvingKey(pkPath)
 	vk, vkErr := LoadVerifyingKey(vkPath)
