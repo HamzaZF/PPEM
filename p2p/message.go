@@ -39,8 +39,9 @@ func (p *G1AffineJSON) UnmarshalJSON(data []byte) error {
 // Message is the generic envelope for any message sent over the network.
 // It allows for flexible communication of different data structures.
 type Message struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Type     string          `json:"type"`
+	Payload  json.RawMessage `json:"payload"`
+	SenderID string          `json:"senderId"`
 }
 
 // --- Diffie-Hellman State and Payloads ---
