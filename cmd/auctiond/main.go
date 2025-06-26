@@ -23,12 +23,15 @@ import (
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 
-	"implementation/transactions/exchange"
-	"implementation/transactions/register"
-	"implementation/zerocash"
+	"implementation/internal/transactions/exchange"
+	"implementation/internal/transactions/register"
+	"implementation/internal/transactions/withdraw"
+	"implementation/internal/zerocash"
 
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
 	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
@@ -43,6 +46,34 @@ func toGnarkPoint(p *bls12377.G1Affine) *sw_bls12377.G1Affine {
 	return &sw_bls12377.G1Affine{
 		X: new(big.Int).SetBytes(xBytes[:]).String(),
 		Y: new(big.Int).SetBytes(yBytes[:]).String(),
+	}
+}
+
+// runReceivingPhase implements the receiving phase as per the protocol
+func runReceivingPhase(participants []*zerocash.Participant, ledger *zerocash.Ledger, pk groth16.ProvingKey, ccs constraint.ConstraintSystem, vk groth16.VerifyingKey) {
+	log.Println("=== Receiving Phase ===")
+
+	// 1. Check if the auctioneer performed the exchange (TxList_temp has valid exchange tx/proof)
+	exchangeSucceeded := ledger.HasValidExchange()
+	if exchangeSucceeded {
+		log.Println("Auctioneer performed the exchange. Distributing funds to participants...")
+		for _, p := range participants {
+			// Each participant reads TxList_temp and adds received funds for pk_out to their permanent wallet
+			if err := p.Wallet.ClaimExchangeOutput(ledger); err != nil {
+				log.Printf("[WARN] Participant %s failed to claim exchange output: %v", p.Name, err)
+			} else {
+				log.Printf("[INFO] Participant %s successfully claimed exchange output.", p.Name)
+			}
+		}
+	} else {
+		log.Println("Auctioneer failed to perform the exchange. Triggering withdrawal for all participants...")
+		for _, p := range participants {
+			if err := triggerWithdraw(p, ledger, pk, ccs, vk); err != nil {
+				log.Printf("[ERROR] Participant %s withdrawal failed: %v", p.Name, err)
+			} else {
+				log.Printf("[INFO] Participant %s successfully withdrew their funds.", p.Name)
+			}
+		}
 	}
 }
 
@@ -64,6 +95,15 @@ func main() {
 		return
 	}
 	params := &zerocash.Params{}
+
+	// Load or create the ledger
+	ledgerPath := "ledger.json"
+	var ledger *zerocash.Ledger
+	if l, err := zerocash.LoadLedgerFromFile(ledgerPath); err == nil {
+		ledger = l
+	} else {
+		ledger = zerocash.NewLedger()
+	}
 
 	// 2. Create auctioneer and 10 participants
 	auctioneer := zerocash.NewParticipant("Auctioneer", pk, vk, params, zerocash.RoleAuctioneer, nil)
@@ -88,8 +128,8 @@ func main() {
 			log.Printf("ERROR: registration failed for %s: %v", p.Name, err)
 			return
 		}
-		// Save note to wallet
-		p.Wallet.AddNote(note, skBytes[:])
+		// Save note to wallet (use all 5 args, fill with nil/zero as needed)
+		p.Wallet.AddNote(note, skBytes[:], nil, [5]byte{}, note)
 		walletPath := fmt.Sprintf("%s_wallet.json", p.Name)
 		if err := p.Wallet.Save(walletPath); err != nil {
 			log.Printf("ERROR: wallet save failed for %s: %v", p.Name, err)
@@ -122,6 +162,9 @@ func main() {
 	fmt.Printf("Output Transaction: %+v\n", txOut)
 	fmt.Printf("Public Info: %+v\n", info)
 
+	// 6. Receiving phase (new)
+	runReceivingPhase(participants, ledger, pk, ccs, vk)
+
 	// (Optional) Save proof and txOut to files or ledger as needed
 	// Withdraw phase not implemented yet
 }
@@ -140,6 +183,80 @@ func appendTxToLedger(tx *zerocash.Tx) error {
 	}
 	if err := ledger.SaveToFile(ledgerPath); err != nil {
 		return fmt.Errorf("ledger save failed: %w", err)
+	}
+	return nil
+}
+
+// Add a CLI command to trigger withdrawal for a participant
+func triggerWithdraw(participant *zerocash.Participant, ledger *zerocash.Ledger, pk groth16.ProvingKey, ccs constraint.ConstraintSystem, vk groth16.VerifyingKey) error {
+	// Gather required data from wallet/state using accessors
+	unspentNotes := participant.Wallet.GetUnspentNotes()
+	var nInZ *zerocash.Note
+	if len(unspentNotes) > 0 {
+		nInZ = unspentNotes[0]
+	} else {
+		nInZ = nil
+	}
+	skInBytes := participant.Wallet.GetWithdrawSk()
+	rEncBytes := participant.Wallet.GetWithdrawREnc()
+	nOutZ := participant.Wallet.GetWithdrawOutputNote()
+	pkT := participant.Wallet.GetWithdrawPkT()
+	cipherAuxBytes := participant.Wallet.GetWithdrawCipherAux()
+
+	// Convert zerocash.Note to withdraw.Note
+	noteToWithdrawNote := func(n *zerocash.Note) withdraw.Note {
+		if n == nil {
+			return withdraw.Note{}
+		}
+		return withdraw.Note{
+			Coins:  n.Value.Coins,
+			Energy: n.Value.Energy,
+			Pk:     new(big.Int).SetBytes(n.PkOwner),
+			Rho:    new(big.Int).SetBytes(n.Rho),
+			R:      new(big.Int).SetBytes(n.Rand),
+			Cm:     new(big.Int).SetBytes(n.Cm),
+		}
+	}
+	nIn := noteToWithdrawNote(nInZ)
+	nOut := noteToWithdrawNote(nOutZ)
+
+	// Convert skIn and rEnc to *big.Int
+	skIn := new(big.Int)
+	if skInBytes != nil {
+		skIn.SetBytes(skInBytes)
+	}
+	rEnc := new(big.Int)
+	if rEncBytes != nil {
+		rEnc.SetBytes(rEncBytes)
+	}
+
+	// Convert pkT to sw_bls12377.G1Affine
+	var pkTgnark sw_bls12377.G1Affine
+	if pkT != nil {
+		pkTgnark.X = pkT.X.String()
+		pkTgnark.Y = pkT.Y.String()
+	}
+
+	// Convert [3][]byte to [3]*big.Int
+	var cipherAux [3]*big.Int
+	for i := 0; i < 3; i++ {
+		cipherAux[i] = new(big.Int)
+		if cipherAuxBytes[i] != nil {
+			cipherAux[i].SetBytes(cipherAuxBytes[i])
+		}
+	}
+
+	if nInZ == nil || skInBytes == nil || rEncBytes == nil || nOutZ == nil {
+		log.Printf("[ERROR] Withdraw input is nil: nIn=%v skIn=%v rEnc=%v nOut=%v", nInZ, skInBytes, rEncBytes, nOutZ)
+		return fmt.Errorf("withdraw input is nil: nIn=%v skIn=%v rEnc=%v nOut=%v", nInZ, skInBytes, rEncBytes, nOutZ)
+	}
+
+	tx, proof, err := withdraw.Withdraw(nIn, skIn, rEnc, nOut, pkTgnark, cipherAux, pk, ccs)
+	if err != nil {
+		return err
+	}
+	if err := ledger.SubmitWithdrawTx(tx, proof, vk); err != nil {
+		return err
 	}
 	return nil
 }
