@@ -53,13 +53,15 @@ func main() {
 	var circuit exchange.CircuitTxF10
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
-		log.Fatalf("circuit compilation failed: %v", err)
+		log.Printf("ERROR: circuit compilation failed: %v", err)
+		return
 	}
 	pkPath := "proving_f10.key"
 	vkPath := "verifying_f10.key"
 	pk, vk, err := zerocash.SetupOrLoadKeys(ccs, pkPath, vkPath)
 	if err != nil {
-		log.Fatalf("SetupOrLoadKeys failed: %v", err)
+		log.Printf("ERROR: SetupOrLoadKeys failed: %v", err)
+		return
 	}
 	params := &zerocash.Params{}
 
@@ -81,16 +83,17 @@ func main() {
 		note := zerocash.NewNote(coins, energy, skBytes[:])
 		bid := big.NewInt(10 + int64(i)) // Example: unique bid per participant
 		bids[i] = bid
-		fmt.Printf("DEBUG: Registering participant %s with sk: %x\n", p.Name, skBytes[:])
 		regResult, err := register.Register(p, note, bid, pk, skBytes[:])
 		if err != nil {
-			log.Fatalf("registration failed for %s: %v", p.Name, err)
+			log.Printf("ERROR: registration failed for %s: %v", p.Name, err)
+			return
 		}
 		// Save note to wallet
 		p.Wallet.AddNote(note, skBytes[:])
 		walletPath := fmt.Sprintf("%s_wallet.json", p.Name)
 		if err := p.Wallet.Save(walletPath); err != nil {
-			log.Fatalf("wallet save failed for %s: %v", p.Name, err)
+			log.Printf("ERROR: wallet save failed for %s: %v", p.Name, err)
+			return
 		}
 		// Prepare registration payload for auction phase
 		regPayloads[i] = exchange.RegistrationPayload{
@@ -98,7 +101,10 @@ func main() {
 			PubKey:     toGnarkPoint(p.Pk),
 		}
 		// Append tx^in to global ledger
-		appendTxToLedger(regResult.TxIn)
+		if err := appendTxToLedger(regResult.TxIn); err != nil {
+			log.Printf("ERROR: ledger append failed: %v", err)
+			return
+		}
 	}
 
 	log.Println("All participants registered. Starting auction phase...")
@@ -106,7 +112,8 @@ func main() {
 	// 4. Auction phase: run ExchangePhase
 	txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), params, pk, ccs)
 	if err != nil {
-		log.Fatalf("Auction phase failed: %v", err)
+		log.Printf("ERROR: Auction phase failed: %v", err)
+		return
 	}
 
 	// 5. Output results
@@ -120,7 +127,7 @@ func main() {
 }
 
 // appendTxToLedger appends a transaction to the global ledger.json file
-func appendTxToLedger(tx *zerocash.Tx) {
+func appendTxToLedger(tx *zerocash.Tx) error {
 	ledgerPath := "ledger.json"
 	var ledger *zerocash.Ledger
 	if l, err := zerocash.LoadLedgerFromFile(ledgerPath); err == nil {
@@ -129,9 +136,10 @@ func appendTxToLedger(tx *zerocash.Tx) {
 		ledger = zerocash.NewLedger()
 	}
 	if err := ledger.AppendTx(tx); err != nil {
-		log.Fatalf("ledger append failed: %v", err)
+		return fmt.Errorf("ledger append failed: %w", err)
 	}
 	if err := ledger.SaveToFile(ledgerPath); err != nil {
-		log.Fatalf("ledger save failed: %v", err)
+		return fmt.Errorf("ledger save failed: %w", err)
 	}
+	return nil
 }

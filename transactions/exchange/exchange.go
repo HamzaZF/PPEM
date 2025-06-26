@@ -9,8 +9,10 @@ package exchange
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
@@ -137,8 +139,6 @@ func onesArray5() [5]frontend.Variable {
 
 // BuildWitnessF10 builds the witness for CircuitTxF10 from input/output notes.
 func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int) *CircuitTxF10 {
-	fmt.Printf("DEBUG: BuildWitnessF10 called with %d inputs, %d outputs, %d payloads\n", len(inputs), len(outputs), len(payloads))
-
 	w := &CircuitTxF10{}
 
 	// Helper to convert *big.Int to frontend.Variable with nil handling
@@ -670,6 +670,85 @@ func GenerateProofF10(witness *CircuitTxF10, pk groth16.ProvingKey, ccs constrai
 	return proofBuf.Bytes(), nil
 }
 
+// AuctionResult represents the output of the auction phase
+type AuctionResult struct {
+	WinnerID    string   `json:"winner_id"`
+	WinningBid  *big.Int `json:"winning_bid"`
+	TotalBids   int      `json:"total_bids"`
+	TotalCoins  *big.Int `json:"total_coins"`
+	TotalEnergy *big.Int `json:"total_energy"`
+	Timestamp   int64    `json:"timestamp"`
+	ProofHash   string   `json:"proof_hash"`
+}
+
+// PublicInfo represents public information about the auction
+type PublicInfo struct {
+	AuctionID    string   `json:"auction_id"`
+	Participants int      `json:"participants"`
+	TotalBids    int      `json:"total_bids"`
+	WinnerID     string   `json:"winner_id"`
+	WinningBid   *big.Int `json:"winning_bid"`
+	Timestamp    int64    `json:"timestamp"`
+	Status       string   `json:"status"`
+}
+
+// validateExchangeInputs validates all inputs to ExchangePhase
+func validateExchangeInputs(
+	regPayloads []RegistrationPayload,
+	auctioneerSk *big.Int,
+	params *zerocash.Params,
+	pk groth16.ProvingKey,
+	ccs constraint.ConstraintSystem,
+) error {
+	// Validate registration payloads
+	if len(regPayloads) == 0 {
+		return fmt.Errorf("no registration payloads provided")
+	}
+	if len(regPayloads) > 10 {
+		return fmt.Errorf("too many registration payloads: %d (max 10)", len(regPayloads))
+	}
+
+	for i, payload := range regPayloads {
+		if len(payload.Ciphertext) != 5 {
+			return fmt.Errorf("invalid ciphertext for payload %d: expected 5 elements, got %d", i, len(payload.Ciphertext))
+		}
+		// Check if any element is nil
+		for j, elem := range payload.Ciphertext {
+			if elem == nil {
+				return fmt.Errorf("ciphertext element %d is nil for payload %d", j, i)
+			}
+		}
+		if payload.PubKey == nil {
+			return fmt.Errorf("missing public key for payload %d", i)
+		}
+	}
+
+	// Validate auctioneer secret key
+	if auctioneerSk == nil {
+		return fmt.Errorf("auctioneer secret key is nil")
+	}
+	if auctioneerSk.Sign() <= 0 {
+		return fmt.Errorf("auctioneer secret key must be positive")
+	}
+
+	// Validate params
+	if params == nil {
+		return fmt.Errorf("zerocash params is nil")
+	}
+
+	// Validate proving key
+	if pk == nil {
+		return fmt.Errorf("proving key is nil")
+	}
+
+	// Validate constraint system
+	if ccs == nil {
+		return fmt.Errorf("constraint system is nil")
+	}
+
+	return nil
+}
+
 // ExchangePhase runs the auction phase as per Algorithm 3 (without ZKP-enforced auction logic).
 //   - regPayloads: Registration payloads (ciphertexts + pubkeys)
 //   - auctioneerSk: Auctioneer's DH secret key
@@ -685,6 +764,11 @@ func ExchangePhase(
 	pk groth16.ProvingKey,
 	ccs constraint.ConstraintSystem,
 ) (txOut interface{}, info interface{}, proof []byte, err error) {
+	// Input validation
+	if err := validateExchangeInputs(regPayloads, auctioneerSk, params, pk, ccs); err != nil {
+		return nil, nil, nil, fmt.Errorf("input validation failed: %w", err)
+	}
+
 	// 1. Decrypt all registration payloads
 	inputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
 	if err != nil {
@@ -703,6 +787,53 @@ func ExchangePhase(
 		return nil, nil, nil, err
 	}
 
-	// 5. Return (txOut, info, proof)
-	return nil, nil, proof, nil // TODO: fill in txOut, info
+	// 5. Create structured output
+	timestamp := time.Now().Unix()
+
+	// Calculate totals from inputs
+	totalCoins := big.NewInt(0)
+	totalEnergy := big.NewInt(0)
+	highestBid := big.NewInt(0)
+	winnerID := ""
+
+	for i, input := range inputs {
+		if input.Coins != nil {
+			totalCoins.Add(totalCoins, input.Coins)
+		}
+		if input.Energy != nil {
+			totalEnergy.Add(totalEnergy, input.Energy)
+		}
+		if input.Bid != nil && input.Bid.Cmp(highestBid) > 0 {
+			highestBid.Set(input.Bid)
+			winnerID = fmt.Sprintf("Participant%d", i+1)
+		}
+	}
+
+	// Create proof hash for verification
+	proofHash := fmt.Sprintf("%x", sha256.Sum256(proof))
+
+	// Create auction result
+	auctionResult := &AuctionResult{
+		WinnerID:    winnerID,
+		WinningBid:  highestBid,
+		TotalBids:   len(inputs),
+		TotalCoins:  totalCoins,
+		TotalEnergy: totalEnergy,
+		Timestamp:   timestamp,
+		ProofHash:   proofHash,
+	}
+
+	// Create public info
+	publicInfo := &PublicInfo{
+		AuctionID:    fmt.Sprintf("auction_%d", timestamp),
+		Participants: len(inputs),
+		TotalBids:    len(inputs),
+		WinnerID:     winnerID,
+		WinningBid:   highestBid,
+		Timestamp:    timestamp,
+		Status:       "completed",
+	}
+
+	// 6. Return structured results
+	return auctionResult, publicInfo, proof, nil
 }

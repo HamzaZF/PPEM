@@ -375,6 +375,46 @@
       "Rho": "rE4tKCxYy5VJiBx0sOhTIuAxfSnE12pLcqHWsKbqL+E=",
       "Rand": "N5VNysGwilhIBtoVhgbn3X5wjI/z+HOlWXNG6jhw/0U=",
       "Cm": "ALmvIFwn35E420P9Yhl3SrkWLzgCYdM3KDU2tUSpqx5BLbvASDo2AhhliwTwRv5e"
+    },
+    {
+      "Value": {
+        "Coins": 107,
+        "Energy": 57
+      },
+      "PkOwner": "AQcqOaTrOixDnHkKHXvOK8PXoZehQ2P7/7gaKPW5RpCIS1njnyDWxAMEXIh+ODof",
+      "Rho": "Y+hmI5TxI8V570FqXVHh5RRpMEHPHkQ7dso43R+Jk8A=",
+      "Rand": "Onc4RqGQX4KL/miaqR8Etyv9MPcCupR97d5hMxvvsgg=",
+      "Cm": "AapmpxdVrreRIjVtiYWDOBwjnZhGYJXdxDIov/ocF6kJZBf2sRsLVnqVJuMZxz/G"
+    },
+    {
+      "Value": {
+        "Coins": 107,
+        "Energy": 57
+      },
+      "PkOwner": "AMB/3COFMs1oxk2nQvDsojkEtq/G/Uzao/ILMpD0adVuuiTua83CsSv0UDoHsskw",
+      "Rho": "1gND+4ub8BiUmEyityyeV2FFWOYulCrpwyzuccrPya8=",
+      "Rand": "Zx5XOPIVTo3Vd6z2u9xV690MseO3oLjIKf1ijQvByPo=",
+      "Cm": "ARt5qZankpvvfKMk0RXb595DlwSebdJxDdqa15HxXP6XDv0i5c5xPhVbjCYyDqUu"
+    },
+    {
+      "Value": {
+        "Coins": 107,
+        "Energy": 57
+      },
+      "PkOwner": "ALOZmCfpYjpMZiJQn1PIrdhFYQMjyt8wyEKfTCghOh95Tkl5WGzOSAa1lWREcIYP",
+      "Rho": "488VWRM44i+Zv3ZwXY9nKzwfhMEySUc9Iy/DgakVgGs=",
+      "Rand": "iaz5qLz26hVVpGv5SI3eJPsPrqnIIhh8eUmYE0hoH6I=",
+      "Cm": "ASstMgU+4bqDDzgwPz9xrhSGsNM69SEtZjvO9eLma4cqxHOEpMEFKeQH64VFBSh9"
+    },
+    {
+      "Value": {
+        "Coins": 107,
+        "Energy": 57
+      },
+      "PkOwner": "AVLQMBB/6OFEWCIsIPyZBpvZHAZVgRQKnG+FGwwortva/EK/jExvNqicE1A+E75w",
+      "Rho": "caEMCrFQq8sggSCudRWGTBZwE9kGhCVtyFjtVqlxR28=",
+      "Rand": "vxI+ujBqXaPDaYzPr41RcmZrygoOp6bOOq0uEJUgIwg=",
+      "Cm": "ABcdZKoJztxvCO/92dZfIAOOv4ck+Qn3MK7X1wU7g0kRRw1Xqy+pVh+6JZ4Q+2or"
     }
   ],
   "NoteKeys": [
@@ -414,9 +454,17 @@
     "B7I3G/aMHJ2mUVliz0EIbrRREnY92LQuUd7P11Lt0TU=",
     "BGE5gIgwjkhNWtiHcibql5AxeS6uoXTjzdVwtWwICQY=",
     "DzO56Ps7mQU+bu6usiqtikZ4YDfGVQK79IvZmZ2s+KM=",
-    "Ea8mODSS4qT1yXMXeaPfnBm6celwk7me/cZSGJ97r14="
+    "Ea8mODSS4qT1yXMXeaPfnBm6celwk7me/cZSGJ97r14=",
+    "CcJ+WLx1WfoWhMlxC2J9jevLixPpMbPrgoHBrGhE2Lg=",
+    "DSjRvYMftm+HER3hidt8SWvhYbeBs8S9jVcV8rJSqUA=",
+    "DVadOfxOek6gP9kmTt7xC3CHwFbh/zD0Hh39TCqX/eU=",
+    "ENS+cjo4Uc61JMga1OJHKomcpyxi4GR8aoyv9UVcjc0="
   ],
   "Spent": [
+    false,
+    false,
+    false,
+    false,
     false,
     false,
     false,

@@ -375,6 +375,46 @@
       "Rho": "nnUc+3BNWaCuFYMfHV45tSbkY82Q67olVIxY4osQXQA=",
       "Rand": "Ajz1MNR3F3Yy/fSDIBzIdggUNDDiMQ1R9n0BXj03a7E=",
       "Cm": "ACTjYBNrlqkZX0wt7Ygo7UjcLz2Cx025I7gLJKROAIFp4CxEA0oj2at4sTna/xAQ"
+    },
+    {
+      "Value": {
+        "Coins": 101,
+        "Energy": 51
+      },
+      "PkOwner": "ADRi/n0sQglAa1jhh1B19IO9a+tDsZUw1B76ONbiYuLmS6FoKBX08vn/GFPxZ2+m",
+      "Rho": "qJcOeDFi9S+Oj0fs6yREFqjfnLsBXg/qdBqoVf66NDQ=",
+      "Rand": "CAeZklN3Zdz5b4Dwse8hvRQUZ+8MqdhOCE6/s4crvlk=",
+      "Cm": "AKeIt/zyRJi+XSuuOG/zwwZP4eP6+FBmPhGz6auP7LWSzLvtNDVaBFEHUpsjtzhF"
+    },
+    {
+      "Value": {
+        "Coins": 101,
+        "Energy": 51
+      },
+      "PkOwner": "ADQKGQ/oPGQF4ibMgeoyV/UUymRCCQMSoqV+6TTdx87M7iCbNh5b7qE0IzMC3aPV",
+      "Rho": "zCu/2FWcH41IaHzS2aJXZutyfihyoN1uqo8dMXEp34s=",
+      "Rand": "hQEGJE4kI9/GLG+iF9tV9CyI5z2s54pjz0FcNovgZp4=",
+      "Cm": "AO4fjNwIJiJjdGeAPa0yq22J3G2bqJkUrsz8BmuM0i6RRTnni2afyrBqqX6Qn1Dd"
+    },
+    {
+      "Value": {
+        "Coins": 101,
+        "Energy": 51
+      },
+      "PkOwner": "AAcg3LrRNPodZyg+VhDHnZeJDDc+mnLmcUnVKtlirqevKMoaI+sTgrHjzSpx1u8D",
+      "Rho": "jlxvNWsor32bGEHmlgxTs3OU3cIRx84lZZOrSUS0hbM=",
+      "Rand": "B4B0xjkw6zEUq37qQgeDrG9/Ui8SMxEK+Joe7az9F6I=",
+      "Cm": "AEV8FClqb/MaqYMZqmEgHzZrlalTnA5nbldp94K0g2p12LwB5ZZbRLDgydlJrNnt"
+    },
+    {
+      "Value": {
+        "Coins": 101,
+        "Energy": 51
+      },
+      "PkOwner": "ALvX3Oy6x3TeLThpdL1G7ChkD15zVuH2xbq8PNj1WYkPzPwx8vFlt8X+BeRbNdPk",
+      "Rho": "/735oUVOcn26nz9INgM1aFNB8kUSIvNjMycTi8wrZ7c=",
+      "Rand": "bsmDae6SYGUnd+ENsWAhL2oOqXwjKV4Sf7wYXqjrnAQ=",
+      "Cm": "AUS7K1vWd4qcEuzcHe3wlEcnPwRowvyhdgKX8/2/lbBVCb8+dd1flVdVtrHMME71"
     }
   ],
   "NoteKeys": [
@@ -414,9 +454,17 @@
     "BqAjGFPNpLN4RWYhn2xLtEOv7oynlm3+/FIPK4h9o7M=",
     "CCGLVOFxNnPryf5lXz9qL+/jg24jyodwJmA7aVjqNAA=",
     "Dr/nK7qjgp6tpGGj4JVR6VGB1IoNxwNRvBqcNMPUcRs=",
-    "Be+Nk0gFv3q4u0r8G2l5ygPfkLw2SfStEcBHhFYByFI="
+    "Be+Nk0gFv3q4u0r8G2l5ygPfkLw2SfStEcBHhFYByFI=",
+    "Ee8trQP8lHLNh5axzPW0ONi9ns6CP5sBo87B9CruMTk=",
+    "B2EQcwzDDQ8QuGTp52LwkgFiloxvyy3cT3OhsttBdGg=",
+    "DszNE8f4X+/OiEq4yZgE6BWuDkgTBxqiFvUjQ0+1kiQ=",
+    "AIdjpFwW1i1ruVetvWcvqA3VI0A49XklfzzlHFqs9gQ="
   ],
   "Spent": [
+    false,
+    false,
+    false,
+    false,
     false,
     false,
     false,

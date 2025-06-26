@@ -375,6 +375,46 @@
       "Rho": "/1eczhelMppLQ0UTpSL7SDp3Sig6mFxpv6P9WbDlF7A=",
       "Rand": "QFG5t9xJYGADMD7ixrEXdDKDB3gO0yiYinMKF+hcuaA=",
       "Cm": "AFZcWfz1mANd6hLSe9LxXpCDgQGr/hZE1ajcD5C86FENaZrYdxs534TIX0WgZT/Y"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ABAmEiK7CUUWFa4+yQ/n+itidCNBnjtL7m34OvHOvHP7+nuTBiffazQ7OgfjxdBp",
+      "Rho": "B3RGktLhzvByDsW+yimjT96efrc5BVTLAgXHc8YvRXk=",
+      "Rand": "laEHsiBjexZCS3bmfvteYO/lXSl+BdOflVR8Rdpv/sQ=",
+      "Cm": "AOM6sE5NFUei5WV3lFyuUwOsi1GSkruaXpF/nA4O+t5Hyg3uDkbaeN/Lfx+iCvKm"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AIFfdBIw64t6TxPx/d61KLGvpuUjjoWizJgq+j9MOhipJRySdkUof1GqVP0r0404",
+      "Rho": "UeXvmh79I1QlWJl86GJUJO9GNjSYP0R2nqgLF59s5HY=",
+      "Rand": "Z8CO99TxS6SwsWNxg4QvYoTa94zeMFOR1k/RPWW1puE=",
+      "Cm": "AFLCAQ11WwHqkwHreSuXgH4oNelGYqUUrVE/va0wugqN831/yc97dzABdYBxas+T"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ARx7BKxMBRvux86kEirHFd/9xgMhKi9i1r2cZDTseOz1fXDBKf5T0eKHvLXzc6tU",
+      "Rho": "wHNcHMEfiGk4nKj/1BB4Uxj5Ndfz+pxBIM6ARRLDi0w=",
+      "Rand": "EA7hD/18BJRvDFJb8s980STYpP0qVcli6eR5o2rHNDk=",
+      "Cm": "AYQba4vIZBXQcVRhX9ENQKGTpv2wkxXReajmDV5QLnfhfZrgZPv0xSjGpFIIXDCW"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AADDqc7u4pehRiflBGEq56gxXta0n29BuY8H2gVREak35z3nLADUoBnbDvgjwLCm",
+      "Rho": "dthIb1pwl3fNFUeTjbptFNR+E08NXHmqO+G0AfKemLo=",
+      "Rand": "UVGFnNV+CNPpkpFBac2tbvovR5/lc0IyP3N9ZyCf3rU=",
+      "Cm": "AM6RNEkZy5jfpPFxQ45SGQaEJCRJW5ZJgAOXa/SCS1M0xWwbQ+U/dmr/XhhSBaR0"
     }
   ],
   "NoteKeys": [
@@ -414,9 +454,17 @@
     "B0hEkUoNHvaWqR2wQ+LZFxFPGiFWy9GICqrfU23a0dI=",
     "D2FEKTvdETrcSz4EkmZvAPeOGSqr5IsVUUIfxW0mqEk=",
     "CjFTWZHeiZ/2/bCk2yoMQ+1WycPfDb3btdrf0fEyQQA=",
-    "CGS2H5C8/SGbzD8gaph6t3UxAPM315JS+UFjLZzug6s="
+    "CGS2H5C8/SGbzD8gaph6t3UxAPM315JS+UFjLZzug6s=",
+    "ED7nZcCA8dfWh1klRovAYO3Tz6YMIkUgW9KprJPRmPk=",
+    "EZtW7AXC542nFWBUg+Uo+JIyN0X8qGe3o8mXdI1ufXY=",
+    "CLUjnNk6rQMjmRgrKxMN7IzxDQnEdn8ld8ic/n1QSkg=",
+    "EXnbXSoNXMsk6C19ZdDSTm4hB7wlP8/1uPOb5JvzpIU="
   ],
   "Spent": [
+    false,
+    false,
+    false,
+    false,
     false,
     false,
     false,

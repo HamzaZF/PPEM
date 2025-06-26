@@ -2,7 +2,6 @@ package register
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
@@ -43,26 +42,14 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	// Use the same secret key that was used to create the note
 	skBytes := noteSk
 	pkOutBytes := pkOut.X.BigInt(new(big.Int)).Bytes()
-	// Debug print all inputs
-	fmt.Printf("[Register] note: %+v\n", note)
-	fmt.Printf("[Register] skBytes: %x\n", skBytes)
-	fmt.Printf("[Register] pkOutBytes: %x\n", pkOutBytes)
-	fmt.Printf("[Register] coins: %s, energy: %s\n", coins.String(), energy.String())
-
-	// Debug: Check if PkOld matches H(skOld)
-	computedPk := mimcHash(skBytes)
-	fmt.Printf("[Register] note.PkOwner: %x\n", note.PkOwner)
-	fmt.Printf("[Register] computed H(skOld): %x\n", computedPk)
-	fmt.Printf("[Register] PkOld match: %v\n", string(note.PkOwner) == string(computedPk))
 
 	txIn, err := zerocash.CreateTx(note, skBytes, pkOutBytes, coins, energy, participant.Params, pk)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("[Register] txIn: %+v\n", txIn)
-
 	// Step 4: Sample r_enc (b, r) for encryption randomness (already in CreateTx logic)
+
 	// Step 5: Compute c^Aux = MiMC-based encryption using DH shared key
 	// For registration, encrypt (coins, energy, bid, sk_in, pk_out)
 	skInBig := new(big.Int).SetBytes(skBytes)
