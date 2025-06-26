@@ -1,8 +1,8 @@
-// main.go - Comprehensive N=5 participant + 1 auctioneer registration scenario.
+// main.go - Comprehensive N=10 participant + 1 auctioneer registration scenario.
 //
 // This demonstrates the complete registration phase of the auction protocol:
 //   - 1 auctioneer starts and exposes their public key
-//   - 5 participants each create a note and register with the auctioneer
+//   - 10 participants each create a note and register with the auctioneer
 //   - Each registration produces a Zerocash transaction (Algorithm 1) and encrypted payload (Algorithm 2)
 //   - The auctioneer decrypts all registration payloads
 //   - The global ledger shows all transactions
@@ -21,312 +21,117 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"sync"
-	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 
+	"implementation/transactions/exchange"
 	"implementation/transactions/register"
 	"implementation/zerocash"
+
+	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
+	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
 )
 
-const (
-	numParticipants = 5
-	auctioneerPort  = 8080
-	participantPort = 8081
-)
+const N = 10
 
-// RegistrationData holds the decrypted registration information
-type RegistrationData struct {
-	ParticipantID string   `json:"participant_id"`
-	Coins         *big.Int `json:"coins"`
-	Energy        *big.Int `json:"energy"`
-	Bid           *big.Int `json:"bid"`
-	SkIn          *big.Int `json:"sk_in"`
-	PkOut         *big.Int `json:"pk_out"`
-}
-
-// Auctioneer manages the auction process
-type Auctioneer struct {
-	participant   *zerocash.Participant
-	registrations []RegistrationData
-	mu            sync.RWMutex
-}
-
-// NewAuctioneer creates a new auctioneer instance
-func NewAuctioneer(participant *zerocash.Participant) *Auctioneer {
-	return &Auctioneer{
-		participant:   participant,
-		registrations: make([]RegistrationData, 0),
+// toGnarkPoint converts a native BLS12-377 point to gnark format (pointer version).
+func toGnarkPoint(p *bls12377.G1Affine) *sw_bls12377.G1Affine {
+	xBytes := p.X.Bytes()
+	yBytes := p.Y.Bytes()
+	return &sw_bls12377.G1Affine{
+		X: new(big.Int).SetBytes(xBytes[:]).String(),
+		Y: new(big.Int).SetBytes(yBytes[:]).String(),
 	}
 }
 
-// DecryptRegistration decrypts a registration payload using the DH shared key
-func (a *Auctioneer) DecryptRegistration(participantID string, cAux [5]*big.Int, participantPub *zerocash.G1Affine) (*RegistrationData, error) {
-	// Compute DH shared key with this participant
-	sharedKey := zerocash.ComputeDHShared(a.participant.Sk, participantPub)
-
-	// Decrypt the payload (reverse of buildEncZKReg)
-	h := zerocash.NewMiMC()
-	encKeyX := sharedKey.X.BigInt(new(big.Int)).Bytes()
-	encKeyY := sharedKey.Y.BigInt(new(big.Int)).Bytes()
-	h.Write(encKeyX)
-	h.Write(encKeyY)
-	mask0 := h.Sum(nil)
-
-	h.Reset()
-	h.Write(mask0)
-	mask1 := h.Sum(nil)
-
-	h.Reset()
-	h.Write(mask1)
-	mask2 := h.Sum(nil)
-
-	h.Reset()
-	h.Write(mask2)
-	mask3 := h.Sum(nil)
-
-	h.Reset()
-	h.Write(mask3)
-	mask4 := h.Sum(nil)
-
-	// Decrypt each field by subtracting the mask
-	pkOut := new(big.Int).Sub(cAux[0], new(big.Int).SetBytes(mask0))
-	skIn := new(big.Int).Sub(cAux[1], new(big.Int).SetBytes(mask1))
-	bid := new(big.Int).Sub(cAux[2], new(big.Int).SetBytes(mask2))
-	coins := new(big.Int).Sub(cAux[3], new(big.Int).SetBytes(mask3))
-	energy := new(big.Int).Sub(cAux[4], new(big.Int).SetBytes(mask4))
-
-	return &RegistrationData{
-		ParticipantID: participantID,
-		Coins:         coins,
-		Energy:        energy,
-		Bid:           bid,
-		SkIn:          skIn,
-		PkOut:         pkOut,
-	}, nil
-}
-
-// AddRegistration adds a decrypted registration to the auctioneer's list
-func (a *Auctioneer) AddRegistration(reg *RegistrationData) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.registrations = append(a.registrations, *reg)
-}
-
-// GetRegistrations returns all registrations
-func (a *Auctioneer) GetRegistrations() []RegistrationData {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	result := make([]RegistrationData, len(a.registrations))
-	copy(result, a.registrations)
-	return result
-}
-
 func main() {
-	log.Println("=== Starting N=5 Participant + 1 Auctioneer Registration Scenario ===")
+	log.Println("=== Zerocash Auction Protocol: N=10 Scenario ===")
 
-	// Setup ZKP circuit and keys (Groth16, BW6-761)
-	params := &zerocash.Params{}
-	pkPath := "proving.key"
-	vkPath := "verifying.key"
-	var circuit zerocash.CircuitTx
+	// 1. Setup: Compile CircuitTxF10 and generate/load ZKP keys
+	var circuit exchange.CircuitTxF10
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
 		log.Fatalf("circuit compilation failed: %v", err)
 	}
+	pkPath := "proving_f10.key"
+	vkPath := "verifying_f10.key"
 	pk, vk, err := zerocash.SetupOrLoadKeys(ccs, pkPath, vkPath)
 	if err != nil {
 		log.Fatalf("SetupOrLoadKeys failed: %v", err)
 	}
+	params := &zerocash.Params{}
 
-	// Create auctioneer
+	// 2. Create auctioneer and 10 participants
 	auctioneer := zerocash.NewParticipant("Auctioneer", pk, vk, params, zerocash.RoleAuctioneer, nil)
-	auctioneerInstance := NewAuctioneer(auctioneer)
-
-	// Start auctioneer server
-	go func() {
-		log.Printf("Starting auctioneer server on port %d", auctioneerPort)
-		auctioneer.RunServer(auctioneerPort)
-	}()
-
-	// Wait for auctioneer to start
-	time.Sleep(2 * time.Second)
-
-	// Fetch auctioneer's public key
-	auctioneerPub, err := zerocash.FetchPeerPubKey(fmt.Sprintf("localhost:%d", auctioneerPort))
-	if err != nil {
-		log.Fatalf("failed to fetch auctioneer pubkey: %v", err)
+	participants := make([]*zerocash.Participant, N)
+	for i := 0; i < N; i++ {
+		name := fmt.Sprintf("Participant%d", i+1)
+		participants[i] = zerocash.NewParticipant(name, pk, vk, params, zerocash.RoleParticipant, auctioneer.Pk)
 	}
 
-	// Create and start participants
-	participants := make([]*zerocash.Participant, numParticipants)
-	var wg sync.WaitGroup
-
-	for i := 0; i < numParticipants; i++ {
-		participantID := fmt.Sprintf("Participant%d", i+1)
-		port := participantPort + i
-
-		// Create participant with auctioneer's public key
-		participant := zerocash.NewParticipant(participantID, pk, vk, params, zerocash.RoleParticipant, auctioneerPub)
-		participants[i] = participant
-
-		// Start participant server
-		wg.Add(1)
-		go func(p *zerocash.Participant, port int, id string) {
-			defer wg.Done()
-			log.Printf("Starting %s server on port %d", id, port)
-			p.RunServer(port)
-		}(participant, port, participantID)
-
-		// Wait a bit between starts
-		time.Sleep(500 * time.Millisecond)
+	// 3. Each participant creates a note and registration payload
+	regPayloads := make([]exchange.RegistrationPayload, N)
+	bids := make([]*big.Int, N)
+	for i, p := range participants {
+		coins := big.NewInt(100 + int64(i)) // Example: unique coins per participant
+		energy := big.NewInt(50 + int64(i))
+		skBytes := p.Sk.Bytes()
+		note := zerocash.NewNote(coins, energy, skBytes[:])
+		bid := big.NewInt(10 + int64(i)) // Example: unique bid per participant
+		bids[i] = bid
+		fmt.Printf("DEBUG: Registering participant %s with sk: %x\n", p.Name, skBytes[:])
+		regResult, err := register.Register(p, note, bid, pk, skBytes[:])
+		if err != nil {
+			log.Fatalf("registration failed for %s: %v", p.Name, err)
+		}
+		// Save note to wallet
+		p.Wallet.AddNote(note, skBytes[:])
+		walletPath := fmt.Sprintf("%s_wallet.json", p.Name)
+		if err := p.Wallet.Save(walletPath); err != nil {
+			log.Fatalf("wallet save failed for %s: %v", p.Name, err)
+		}
+		// Prepare registration payload for auction phase
+		regPayloads[i] = exchange.RegistrationPayload{
+			Ciphertext: regResult.CAux,
+			PubKey:     toGnarkPoint(p.Pk),
+		}
+		// Append tx^in to global ledger
+		appendTxToLedger(regResult.TxIn)
 	}
 
-	// Wait for all participants to start
-	time.Sleep(3 * time.Second)
+	log.Println("All participants registered. Starting auction phase...")
 
-	log.Println("\n=== Starting Registration Phase ===")
-
-	// Create or load the global ledger
-	ledger, err := zerocash.LoadLedgerFromFile("ledger.json")
+	// 4. Auction phase: run ExchangePhase
+	txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), params, pk, ccs)
 	if err != nil {
-		log.Printf("Creating new ledger (previous load failed: %v)", err)
+		log.Fatalf("Auction phase failed: %v", err)
+	}
+
+	// 5. Output results
+	fmt.Printf("\n=== Auction Phase Complete ===\n")
+	fmt.Printf("Proof (hex): %x\n", proof)
+	fmt.Printf("Output Transaction: %+v\n", txOut)
+	fmt.Printf("Public Info: %+v\n", info)
+
+	// (Optional) Save proof and txOut to files or ledger as needed
+	// Withdraw phase not implemented yet
+}
+
+// appendTxToLedger appends a transaction to the global ledger.json file
+func appendTxToLedger(tx *zerocash.Tx) {
+	ledgerPath := "ledger.json"
+	var ledger *zerocash.Ledger
+	if l, err := zerocash.LoadLedgerFromFile(ledgerPath); err == nil {
+		ledger = l
+	} else {
 		ledger = zerocash.NewLedger()
 	}
-
-	// Each participant registers with the auctioneer
-	for i, participant := range participants {
-		participantID := fmt.Sprintf("Participant%d", i+1)
-
-		// Create a note with different values for each participant
-		coins := big.NewInt(int64(100 + i*50)) // 100, 150, 200, 250, 300
-		energy := big.NewInt(int64(50 + i*25)) // 50, 75, 100, 125, 150
-		bid := big.NewInt(int64(42 + i*10))    // 42, 52, 62, 72, 82
-
-		// Generate a secret key and compute pk = H(sk)
-		mySk := zerocash.RandomBytes(32)
-		myNote := zerocash.NewNote(coins, energy, mySk)
-
-		log.Printf("\n--- %s Registration ---", participantID)
-		log.Printf("Note: coins=%s, energy=%s, bid=%s", coins.String(), energy.String(), bid.String())
-		log.Printf("sk: %x", mySk)
-		log.Printf("note.PkOwner: %x", myNote.PkOwner)
-
-		// Register with the auctioneer
-		regResult, err := register.Register(participant, myNote, bid, participant.PK, mySk)
-		if err != nil {
-			log.Fatalf("%s registration failed: %v", participantID, err)
-		}
-
-		log.Printf("%s registration successful!", participantID)
-		log.Printf("  Ciphertext (c^Aux): [%s, %s, %s, %s, %s]",
-			regResult.CAux[0].String(), regResult.CAux[1].String(),
-			regResult.CAux[2].String(), regResult.CAux[3].String(), regResult.CAux[4].String())
-		log.Printf("  InfoBid: %x", regResult.InfoBid)
-
-		// Append transaction to ledger (as per paper: CmList, SnList, TxList)
-		if err := ledger.AppendTx(regResult.TxIn); err != nil {
-			log.Fatalf("Failed to append %s transaction to ledger: %v", participantID, err)
-		}
-		if err := ledger.SaveToFile("ledger.json"); err != nil {
-			log.Fatalf("Failed to save ledger: %v", err)
-		}
-
-		// Update participant wallet with the new note from the transaction
-		participant.Wallet.AddNote(regResult.TxIn.NewNote, mySk)
-
-		// Mark the old note as spent (it was consumed in the transaction)
-		// Note: In this case, myNote was just created for registration, so it's immediately spent
-		// In a real scenario, this would be a note that was previously in the wallet
-		log.Printf("  Note consumed in transaction (marked as spent)")
-
-		walletPath := fmt.Sprintf("%s_wallet.json", participantID)
-		if err := participant.Wallet.Save(walletPath); err != nil {
-			log.Fatalf("Failed to save %s wallet: %v", participantID, err)
-		}
-
-		// Auctioneer decrypts the registration
-		decryptedReg, err := auctioneerInstance.DecryptRegistration(participantID, regResult.CAux, participant.Pk)
-		if err != nil {
-			log.Fatalf("Failed to decrypt %s registration: %v", participantID, err)
-		}
-
-		auctioneerInstance.AddRegistration(decryptedReg)
-		log.Printf("  Decrypted: coins=%s, energy=%s, bid=%s",
-			decryptedReg.Coins.String(), decryptedReg.Energy.String(), decryptedReg.Bid.String())
+	if err := ledger.AppendTx(tx); err != nil {
+		log.Fatalf("ledger append failed: %v", err)
 	}
-
-	// Wait for all registrations to complete
-	time.Sleep(2 * time.Second)
-
-	log.Println("\n=== Registration Summary ===")
-	registrations := auctioneerInstance.GetRegistrations()
-	for _, reg := range registrations {
-		log.Printf("%s: coins=%s, energy=%s, bid=%s",
-			reg.ParticipantID, reg.Coins.String(), reg.Energy.String(), reg.Bid.String())
+	if err := ledger.SaveToFile(ledgerPath); err != nil {
+		log.Fatalf("ledger save failed: %v", err)
 	}
-
-	// Show ledger state
-	log.Println("\n=== Ledger State ===")
-	log.Printf("Ledger contains %d transactions", len(ledger.GetTxs()))
-	log.Printf("Commitments (CmList): %d items", len(ledger.CmList))
-	log.Printf("Serial Numbers (SnList): %d items", len(ledger.SnList))
-	for i, tx := range ledger.GetTxs() {
-		log.Printf("  Tx %d: %s -> %s (coins=%s, energy=%s)",
-			i+1, tx.OldCoin, tx.NewCoin, tx.NewCoin, tx.NewEnergy)
-	}
-
-	// Show participant wallets
-	log.Println("\n=== Participant Wallets ===")
-	for i := 0; i < numParticipants; i++ {
-		participantID := fmt.Sprintf("Participant%d", i+1)
-		walletPath := fmt.Sprintf("%s_wallet.json", participantID)
-		wallet, err := zerocash.LoadWallet(walletPath)
-		if err != nil {
-			log.Printf("%s wallet: %v", participantID, err)
-		} else {
-			// Check note status against ledger dynamically
-			wallet.CheckNoteStatusAgainstLedger(ledger)
-
-			log.Printf("%s wallet:", participantID)
-			log.Printf("  Name: %s", wallet.Name)
-			log.Printf("  DH Public Key: X=%x, Y=%x", wallet.Pk.X.Bytes(), wallet.Pk.Y.Bytes())
-			log.Printf("  Notes: %d notes", len(wallet.Notes))
-			for j, note := range wallet.Notes {
-				spentStatus := "UNSPENT"
-				if wallet.Spent[j] {
-					spentStatus = "SPENT"
-				}
-				log.Printf("    Note %d (%s): coins=%s, energy=%s, PkOwner=%x",
-					j+1, spentStatus, note.Value.Coins.String(), note.Value.Energy.String(), note.PkOwner)
-				log.Printf("      Commitment: %x", note.Cm)
-				log.Printf("      Rho: %x", note.Rho)
-				log.Printf("      Rand: %x", note.Rand)
-			}
-			log.Printf("  Note Keys: %d secret keys", len(wallet.NoteKeys))
-			for j, sk := range wallet.NoteKeys {
-				log.Printf("    Key %d: %x", j+1, sk)
-			}
-
-			// Show unspent notes summary
-			unspentNotes := wallet.GetUnspentNotes()
-			log.Printf("  Unspent Notes: %d notes available for spending", len(unspentNotes))
-			for j, note := range unspentNotes {
-				log.Printf("    Unspent Note %d: coins=%s, energy=%s",
-					j+1, note.Value.Coins.String(), note.Value.Energy.String())
-			}
-		}
-	}
-
-	log.Println("\n=== Scenario Complete ===")
-	log.Println("All participants have registered with the auctioneer.")
-	log.Println("The auctioneer has decrypted all registration payloads.")
-	log.Println("The ledger contains all Zerocash transactions.")
-	log.Println("Ready to proceed to the next phase of the protocol.")
-
-	// Keep servers running
-	select {}
 }

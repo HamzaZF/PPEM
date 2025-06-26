@@ -1,0 +1,458 @@
+{
+  "Name": "Participant6",
+  "Sk": "800011209834560873812033028349796519779844591036737081413016231222727206812",
+  "Pk": {
+    "X": "232677530797965563961769560249648501099054546954185062837640446552783888677770268415308898916414611377250159180699",
+    "Y": "107168351229512186661032330531618946710204385198928917504533306371642932351119383870660178985487056563978149966915"
+  },
+  "Notes": [
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ATvYDvPJEV/a1k3ACaZSJb03b/niITyL2hLB5KRaUROcHcRgwQ/FWnGx49VcDu1r",
+      "Rho": "DoWK9avcZuMOq0IbMUO/2DyM5HJgwC0s/FekIdIbPUg=",
+      "Rand": "WA1c8hFCSeNBxm50NMzYtIVLR+Kr/uSGpKkxcxSj8HI=",
+      "Cm": "ALJ6WnjTp2o45TU2LuuHjK0DXXPG5tGs9XgCrTpXVH9mcEaMH8HMnYKcLlFQna2Z"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ADgNeV3WZj5mQKJFwjJR2g512NDSHJtn1HGlTe/JOlNenQbOzYC7YenWd+F26F83",
+      "Rho": "pGcRKQDSpxnkR2kZSpN1fnqG1XU17DUeIJMbxfr+AMk=",
+      "Rand": "2OEWdWk1uoYuiQJHrKgfvwI8eLyfMGqmNFD6hD8Ihrw=",
+      "Cm": "AA96LgnHxwfVXKFKYnbKoUUGvLogzv9R1E5KZiEWaQxC0GVSsAhVt0/n13WdwWS+"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AMqrhAKdcFnVmnhr1ib8nKRYKeVp4uBQBI2u1PzCdO2UxMLJ0WVORjpx+JwQnMSw",
+      "Rho": "Jbm5BxuEWrs+226I7ymcZuk0/Sii1QcZZcMimzy55dk=",
+      "Rand": "G5wcCf1bHi7mh4+gc24Rf7F4Dc2GL3S/5tD6i9y5nzg=",
+      "Cm": "ARQRggG00xKM02bfucgsK9RDM4dKv9iIrs4lTD997RQe8edoEB44rLxqM0fHG5aV"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ACqpDvYAn48HBkXVJ2rmIedg7CnA7BZFf1lhsJFrXzYUlALxCrHEgYOY+8Wj0zy3",
+      "Rho": "yK9SSb/g7js0ZZrJgMAl2jxGBuy+lM22q9mEloir4VU=",
+      "Rand": "PrCCwz8oHhiP0E6Q8gY8pgQrfmF3gNty6cmnDBiyNu4=",
+      "Cm": "APt3SZPgr9xJ18/QY4yewEaO1rMYXApYk3OkeUnbHMmTkFeESWzG8qUFRZMG+VeJ"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AJeQYeJ7UCGYF/Zu3Ay1Duy4gMvap3S6TrP2QNrUdRtN/s2j2rtdv1lbTMtQ+CtA",
+      "Rho": "e19o3CzWdoQzlcWzpEaxdOHiOi8vAyDrxksMtoM/ERY=",
+      "Rand": "MciTxTM+7LkVbu1lCScrsA1V/v1kWNW/5uATg4CGMyM=",
+      "Cm": "ACj1F753cSruwLRkgDNlwdBbD8tf4ZD8m/XkZ8FlHJ2bpLCqKTQ+xVFYNnCSLRLb"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ASdJndQ4tLFhnaKKsefgWzWYWwPjMKCRJP4my17cnXFMPKmYwyPP55i3GPCTuQA/",
+      "Rho": "jUFDqaHqCKEQlZC9m+1xuYFi/Flt0pGjmah3+pp50Wo=",
+      "Rand": "nuS+acDHbCtY85Ph8fV+Wk1x8Pp8Yo1NrhGNnjZzRpk=",
+      "Cm": "ASn7szQAUh1jl2yehqMjwhPzsxsWBOqQDrHzKK0qAmnLHiKSk35Yp9f61CJY5rvp"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AJN+yPyOGeaB+z4sMjNzKmqRHky2m6sGHVWKtMdKSNp9ecQ7cb/29KdsghrVGuDo",
+      "Rho": "MAfAQw3IiLXASLyMZmCk1xP7X2lKmjC9YB8hkl/soKU=",
+      "Rand": "3RRr+PKQX/uCm+0IH6RTo8nhvy+/Knbz4advvhV/+Hw=",
+      "Cm": "ANCHp1+9gvJDKkWm3rXxRoYa3+xEsNuNin4bhgS4vzOQz/A4/G1jEQZI/Wsq9Kyr"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AAo7LRkveJK3k7PtcmuDO7RULXCXdkJWL/e5u0gF3z/RanIlhY2LdH9UFMhunXzS",
+      "Rho": "jmokSVaX5skSdOK6s9uaD17r6jhIDOHov+cmVjKyR4M=",
+      "Rand": "t/UQxVltUp0dwXI4Y8HZ4M0GuoQexIijJwclf+RXprw=",
+      "Cm": "AQqMsZWe97igflcm5gseDFvmL5bH1JZf9NgT6gIhhUUbgzpeopIFg3JavN2DBm2I"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AJfYNpDYf/ShcnsxGLIGS3LhCoImQL6svKGkLX5kZrv3VXH8Er/3OmO3JrMPJIgA",
+      "Rho": "agvSat1toS1l6bUcSn8wYMfDFVK5FhQuAYZOqB797kA=",
+      "Rand": "PwXdnSvF12qZPGbhKQ6YbX5cgge7M6DDmn35t2tbL+M=",
+      "Cm": "AWinUwSAYMjS6HBAxmg8jAD25gdGD7TIREjN48Zt6E4hVj7Zt92dX0JneOo0xbEa"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AWxvOlGiQVvujvHXmbhfxmwf8GZPueF28YCOd3/CXrPlYn8uoEiUvna5vZ3Bz8Bq",
+      "Rho": "Ctbb6mShchuDRtHaLjk7XkVMBrXbyXXPPIJFFFGXW7Q=",
+      "Rand": "NfhiINzjc9BOq+gE4SyGdxI/zSxsLN6Jt4qk98AkjdA=",
+      "Cm": "ANdZwoTe/5xLZHfdT63MqSsBnpjmY0XheR3N3UJA9L9Iq8dhV/GEHBP5Mc1V4uVc"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AKDcs4wZs2YJG8uhmdcdimGvbQN6LBP7mJ0qrvSLQYNl0X0HLis2GQPhVdNKzEKS",
+      "Rho": "9JZc8rXgeVYmJAcv0oHn0N225XVfoEJFeJFIN6ItPC4=",
+      "Rand": "gSUn057FRWU0I4ir1Nkh7YZAyA8ff5/JQSWiXBa/fLs=",
+      "Cm": "AR1LifXuqbcT8upuGANRy3oQ2hYt2s/to8w+7XGqXi2glVbkrKndPMKru7NZFW/5"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AaDnQLOckPbnbwjvt56F8ZAF1hBUkp6bfPQDjh5kR/sVjA1GnuG+BNrr4Yu/hEOs",
+      "Rho": "dOr50MTUdhpiUI5f7Aas7WQLksUtGYTzNx8Tkq4X9yk=",
+      "Rand": "TprivsOJAzXrf3uJRY0g8I2BXh3XXvUPRRKgCoZyVck=",
+      "Cm": "AZocIdq8cczB3u0J08p3nizWw3RhTPsu9t2tGHWP5wpcGrEbB2EJOMSoBVtBL+HJ"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ARFCUKlidHB90afgZ9M/8Bdru2xuRIHe9uUnoWJhsN4+M4DNe9aERqz7UcVudDJV",
+      "Rho": "LfQ391IkTpxoYivTluojrOgOVyypnurTDQBBabbHYes=",
+      "Rand": "q7QKqWzFy3Sp8Vu65jIS+uDqvy++tWcamZ1L8l5/vgM=",
+      "Cm": "AXpR5BHYOpM/nxY46shIiTjcme7rnsK55ucf5KbmTxSlZWb1d4O7Mi3FNZG8Z3yx"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AJcOklZkQznyGKwMHoN7lu7N7KczfWNJyguwfbmb5sb3hSYb6deFtBfGoINRKq1j",
+      "Rho": "ropVQydBUp/4carNTYzOTNS8j9TSppEczj18WaH6g5I=",
+      "Rand": "uu5NgP7BJ+rpuzL5vK6dhiDhtWMGiZnO3RN5MLChF0M=",
+      "Cm": "AK+/nJqqpIFCfP4wIaXV/3fQOt6YOeux1gyeQ+Ep82r+h34hFYURt9/u4LiS4vFM"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AFQ5dmJdUk24MSxvCUMmESyu8zLFZAERZiMn6iitu/O3ZouyB4lJJWBlDCZyRy7o",
+      "Rho": "5ne5mFgGs8v3WKxR2zDZ4OR7NpQFOyiI+iwLqLbZpN0=",
+      "Rand": "mTObZpeXbvzMkz5OLryMygYcZKXJm66faMFapcH7mxk=",
+      "Cm": "AFUp5kA37nMaqvHsQ7DH9cyqW7ceX1CqQAOr4L+YbKVo1dPirHPrSqQ3YfFHEPIf"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AQXGSyGMWtJDvagGMBnsMjV4UBVio+Zn7N4ojs8I+USMYLrAsb5X8nf5QpeEoQze",
+      "Rho": "WjeP7HDffutkp2Hzb4FGUlcVHXMloZlG/vuxKgiGKcA=",
+      "Rand": "I0d6m3agVcbiWOp/Ckf4gLOWEqNGd9Zx9LkPTSyQV3s=",
+      "Cm": "AW5eKPscD0t8W5Tx3JOfofA5+FklUABHz2I5fARUAjVIlKQJ/1ukdS8FRB+DgfgF"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AZ76HqQdp35+MRGG43tKrvmL5+g8qxoyvxUkXiWq8lQqaIX7gGEermzbJDWVX0IZ",
+      "Rho": "WC2W38lxzNQQm9ANK1UurYvMknUJKceBTbbtd6Kmrig=",
+      "Rand": "vhMpYJ6QsrPOs+7o2xz6hHoEIC7Ut0cxpzRUY78Hxuo=",
+      "Cm": "ASzSD9BthEJRWHaN0T/HVs8F81vr/ouuXHhI9ziw1niVynADXivw8KQ3Ox5lywQi"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ABAl47uDgtuCnUvb4WtVFsk7Q+ln7wjq6Vf8ZPzTajPPGGr0aSgENPEujUJhBfsG",
+      "Rho": "nThnaMnGpJt19huzImrRL7b5pHrymVBtnD9er5m04Fs=",
+      "Rand": "Sj4lqBQIcg6Gi+eQZMe8CrLCtg4Cx3XDqP5t0DROs0w=",
+      "Cm": "AKwcmCceU17uerVV9/slixZJxtbeKHsdaKFgYlwvij2zhxy69Uv7Xv5OnfD6Lx47"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ALJySScOU7COL+SfYk2JsQwzDaqK1tPiXRDBqztPaEiv26I+wTKFhtO2P70UJ11K",
+      "Rho": "iAzaUtWXO1jDxsyEBlJ0acS9y1m6dyppjsF84EybxVg=",
+      "Rand": "Jdb8HyLVnC0MAWYd80ZfjwSXD+y+4aRTPo763dcO5so=",
+      "Cm": "ATsvRE/Q9T1tAKN5hqo1o0zUP+t1xKq/8nV6WRuOBslM7nABmIlLd+tnACN0nU3X"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AG4e3i7oqzJvMxnP6P5pKEDYmaS04HZLeAKaxn+gUFPNG+qnsFsyN8IL5Ykr6z7d",
+      "Rho": "gL1M+X81BLD/KtBcic/c6F5G7watzx8MeH3L3/OQV3w=",
+      "Rand": "BNelNsKMel2EamPFLZQNxKLqlpWRlsBui4oCNqQQUHM=",
+      "Cm": "AZo+gzI2KR7pmu/eNFXhx+jrxz/c5iN5Tv/KnNyQvMsxNNHjuQcbT8lS9tJdD3uI"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AWZPNyy4JGxHo7zYwuM62OGTp+f9xuOX6NpBICoJgPpmyntYSSYz55H/IZzeONUB",
+      "Rho": "UojbVZY4qPKq3ZJJypNvSDbGaZkPTGzqrlLwVKEXM3Y=",
+      "Rand": "W+A0qboZjd51YDBZadSyyBTkEi5SlIr3Tm98qcNpUI8=",
+      "Cm": "AMBSkZpX4+2Qd2RcK9SnfDVl6XA0jTd0V6IFk93I2vOSWYIHFB/u807i297mZKuG"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AWX7utKuwoU4vTsx0Fzp5577b6PIj2r3ZdNt6xgn5dwjZGYQxLFL4QewEKzQv715",
+      "Rho": "8AA9VXiTMsqjLcZmnRrEc2LFcdHR4J6H1CCV5aJIEuQ=",
+      "Rand": "JiWositX5O5j+XN9dVELl7Z/EkUOILLd5t5bQ6sTejU=",
+      "Cm": "AaupWR1Y9S/B1qEhZjAs4xeep78NNUzwBznnMtq1EeebuzqOqQl1+hrwMm2JYjRE"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AUOksdwhrtZeXnHoutxR7NbZQJlDCtrW/VnHknBUN72JE7IHDUAdsdbf6+OLvd+B",
+      "Rho": "0AEE7x4SQVK0Oo4a6yauweJvobK9UHln9U0x4S2G1Ew=",
+      "Rand": "dN1yfVzClxebwn13560QJ9AZDi7Hzr/pAeAfvod83EE=",
+      "Cm": "ADvq0M07a5uMPF5yG0Oxzymbcy4J3NC3byL9k2mUF230vV2uC+k8UYMBmXbY7c1a"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AN6MpaP6gfdoEOYUYDw1WfMKA6+7duzHpT0aBAfeb4PuMaiPxYgliG3UFSrbXh+B",
+      "Rho": "R/41udbjhtQ+jtb+THLROL9v7Bsr9W7TuqiVRHQkOn8=",
+      "Rand": "oWqV1EA+ZWipGPt1mXZJxsldGMhhZ4V31/A4YIChGlY=",
+      "Cm": "AVHGmKP7Hyq3hkULaJYyE7dCceskK6rSb/eG4UKje0+bI3FSYY6bquoWfjrEOVx3"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AEm2ORaSsQ8xx+ODxGxhA0Pj8jOjPhvIipTSUOoTCPuEaOodS6YrIYn0R4TFhT3r",
+      "Rho": "ZDe1FgrLv0FO4jPvhB8Gh5aPRX4sO5q2U9AtBv2E+Ic=",
+      "Rand": "EN9LIpbqVj7OwbFq3ojBn2h5aCw5Zv8f9Z5uuRkZ3hY=",
+      "Cm": "AMZyEJkZT8//Oi1CRztnBbm7d4ZxLjukwK/VzKWM7/znfJDYru+m/EoEieU2MPyO"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ARd5rWMbtVoGuSfC9BIgqgTR+HyTU0T6ViSRXQ27JGwcGJ3DeXt5rgUuap4NVPjg",
+      "Rho": "pVfLqn7jE+PNVvNYr3AoV8Pzo/zBrg5mFXNfmITZaPo=",
+      "Rand": "gsW5cX7k96bYHdUckQ0pGmE6X0UZtIrNoZ1kt+w1usA=",
+      "Cm": "AJErIhjmfQixtuVRZL7E/V+9I9L7WwPNnQWIeb2zTg4WWbPxUHdOdb5IyuSliOLs"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AGjmc6xtiBHru4AJJ4Z7sIF1n+k8DHSb7/6voNVK92958pTRsUm8gfW1H4P9NBrz",
+      "Rho": "8yIRx3CYjfh+V0RiA0ssnat6tWb5ltR0t+2BAcNVIcw=",
+      "Rand": "OquPAecT+sxFkFJaGKzLm6Bm/srlBiRNrIo/kRCJxj8=",
+      "Cm": "AZr6jZF3aGleMsdijOW+fyJug6vU0jZSR4DrR0Vf2gKaqZl2Tkda1kOHbMi4r3Xw"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AUK3VbFlbpv1x1uV3AoyFPYXXv1qSIp8odbvT6YMt1IiyXP4IoUTeCPdRPYd74xP",
+      "Rho": "qGqWTI9TAd2Hr2YSQV3rzJIHWk0PR5JOSmPKHzT+xPw=",
+      "Rand": "CUmwz4eFcw+mUINfwNoJ4zmi7KBQTokopnXTOE5ycQA=",
+      "Cm": "ASXrKI/FmSw3xXzZK191YtG+1arYWmCoPCPI4mAKppUgG3p9hIzQhV9X3w6uaMzy"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ARlKsvtrJM+X8eZlKxVcI1Uea6pz4aYGNoVlbW/0RkWnLXWQlv8k+JQoy644iubq",
+      "Rho": "/gOwPiKrKr+rzkrlVW0CBNFNZIXOwdZkKCoZA8v4AYk=",
+      "Rand": "TPX4qTdR8Nv2f96MFEp1kBu0b+YRZnhW0MlIrbJ4LLk=",
+      "Cm": "AKv5fqMFCoYrzxwtveYyyO+yfy81x8LFSJhrtD+GfyCN1fJm9is/pQNbkjq37uua"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AAFpH9WFh79YYDJC1yIP8AZzbCkGRegjeFlzlBEl9n/bumLrMMF0+3eGjNjAdr5e",
+      "Rho": "uVysnY3yQROPkQpr8gwtbLv2nl6HxSJypbz0UtcOqts=",
+      "Rand": "dDB2Pzyn47gd4kDVRPkNbmVD5IhhmGKL7nXmNp65ktA=",
+      "Cm": "ADllC+jgheH5JVmRWue2EKeTsujACFQgXd3CKUA0uXt4BPLU9Oqo0D7vgJmDflyk"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AZR6tUM8olrpuWN2YKKZif0EyM0ywU42MmtWNu3rulnvv58OOkL2xpNW1QX86tYj",
+      "Rho": "Xyerw2QcG/Var+OI26TV+5DvQPFAJN53Q1uyFiIo2Ww=",
+      "Rand": "ule77fH8pUdjt7CS+enl36MdDf/fJ9gxqJVQJBzIxjc=",
+      "Cm": "ADH9gWmZkrZgTaXBs5lsRGisTdu3jTTofaZt5/Vri3CGL2FLWflz4xuJH6L0iQZ/"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AG2iydPB8x5eEveLZurb3HkN0esw7pxHxowiX01qHY5+DSD2JLjmTtecBooyqBUy",
+      "Rho": "VCFHRr5qAKr5hOIpLiwaRbZxmJ1ky4NNre93BLXm/Qo=",
+      "Rand": "Uj7S8fxu2sCTSR3DOETgIrJqhV3fmBarNTbWh5sq8Pg=",
+      "Cm": "AX8jnz/7QjAyetdGMpAcjxQ2AjBbEb349ZzrED4ZRJkXckR6e0H5Jp3UqLd3xmeD"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "ARc8iKp+O1yG4YaaOiZiopG/TRaAMQFnDsYAgXW6yJJAonawgzLEDrDfUfX/vjAV",
+      "Rho": "ncaJDFiBfllKPwtxBbA8F9ZDne/shdQBfTLtAvbPp8Y=",
+      "Rand": "LtUD3RM7h7TgUjxy6YlOfUqJsYm7rCmyhmS0SOeNm+0=",
+      "Cm": "AOKX6k3kWD0wnjJwkx1Ay3S39gFOoT3Ely+VZxpxjIZNfmCMf5HKHURk70tOi48u"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AXNPXi/jJAV2EIgqSYmfjP5GP8TguJ4atwgbdp4JAePXtyVUSiLAPKpQmDBzOztQ",
+      "Rho": "05yZ5oyagFa+o59oiCJHoK6rO88l9+SJ3qmUyeZnGQs=",
+      "Rand": "W9kwQQKNo6qvT2tH7/Yk7pJwKha41VFBBrrtOpMtCds=",
+      "Cm": "ACwdwArQUP5HdjVDZ15E37Ufdp1oiDS+7eoyDfeOCeYmmx6G/nfnUJ5wKpwJfb6Z"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AaBlqd0pghLm/OON9nNJY+2EP5BSjWAdb6Vubdx30A/sDM4eCYgErlwlNbC8b+Hm",
+      "Rho": "t5+2f+jvqotuyL8vGG2MBJ1T/Q8OfJc3FvTQegeLDGo=",
+      "Rand": "BMHDCbAiX2NzTFmfuBzm1AT3v5QBqDziO5rkMRvXcXs=",
+      "Cm": "ATwiizAgWKeYaxPuePEw9pAuERUn69acJ8+qp1Upj2CirHkDdqLDY0xja6jjrd5Y"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AW6jClXw1NGgL5MAzhI1dlGULt7cN32hICnRe8gjgtrDrkpkfq20xjySoBjuNq6H",
+      "Rho": "RLN0cSsmlNKb0nBR/qQ0E24++/IZZuZ9EvV0pLg3re0=",
+      "Rand": "PnBrIaV4cxxrETWKL1ggjoNFqz5kbFRTVcjmYobJJ9o=",
+      "Cm": "ABZW0F+Fijzf+AajPiHIMBVhNmo6mSZ0O+jo4n7fBQA1t3ThyH29frWBjCI/cu01"
+    },
+    {
+      "Value": {
+        "Coins": 105,
+        "Energy": 55
+      },
+      "PkOwner": "AEbSDJS3shXY0UXqf0btHXt3nUwWYVCSWPmu8KuPhDMrPLls+fGR2t1YpKF3jVuK",
+      "Rho": "/1eczhelMppLQ0UTpSL7SDp3Sig6mFxpv6P9WbDlF7A=",
+      "Rand": "QFG5t9xJYGADMD7ixrEXdDKDB3gO0yiYinMKF+hcuaA=",
+      "Cm": "AFZcWfz1mANd6hLSe9LxXpCDgQGr/hZE1ajcD5C86FENaZrYdxs534TIX0WgZT/Y"
+    }
+  ],
+  "NoteKeys": [
+    "D4kkylHXPwQ9h+4kG1Vq/fNx9Hxn8S/oT8bkrrCndsU=",
+    "Aug8Z6RCTpbN2XFgIFxKPsNW+a6dgBI/i9yPwTcmoug=",
+    "Cq7IyGpPEk5oV4wN8POgwYYbDRwZ5rbs4cQ+zrIe0Uo=",
+    "EA10D9OHdWxYl74Nq5T3sstocxEKM87xjCrfqXSNtB0=",
+    "A5FUHW5h0L1AG/IYDmg+ShxFJPDoAB6FN/3lSa81vEE=",
+    "BvSuNvOcoOjai8KS++TJKQh937C2MGu/fmiRK20xTPI=",
+    "EqCRh23mcMWgczHCExLr9J/8NGeVIjiyUIIc3SgsysI=",
+    "DecdO/OUxhscA3BFO+eroheQDc06WWxIb5S8ShsZ7nA=",
+    "AIM2jrVGx4XRO3rrnR4tFJlz44CVf86H1b6t81jSE3A=",
+    "C8y0LC0nAY8U058DY8VvzIYm/oPo3u9qLhbHdxuZ1UE=",
+    "DeeDn+wsYVBqCMpGOYnEWJ76eihCPgIdC9xcHdJcn8c=",
+    "Dpb+wpYQAhue60horpf6IjxUx7AzHFK/oWAVU35vVBI=",
+    "AvMcv3584aSF/MZxlipArhRgbmcwUdPVtG/bMxPQinE=",
+    "DFFFxkg4iiReQRVI2Slokq26nxnnGxKwqf1xW9DOiZA=",
+    "AR4or1pZfTQ7PBoPqFB34vKQ7lgdUhQT85Tr9r8JZYc=",
+    "CW0dc5N0l/C152uvCb1IHxaO4wkkOv7yub6r1eHIaGs=",
+    "ADalJZv8mbqltNF7gPj8T+OioMOl2e4RsdGtJ26HXqs=",
+    "CwVVGEF1vVV1Pcx/Zcni8b7NStroGFnLAgtyjrJYFpk=",
+    "DldkPk4zLsFt9Zp5lMGOK4hQrtbj+Ht3cqdj/ufPkeg=",
+    "CRNRYFvvDDn8MCdU8ZV06wA4MbOsywt5XdLx+b76hDQ=",
+    "BniDk43ZVVAj3hdjyaiSEX91sgu5iBmuICZ9mGLxDu4=",
+    "Eka6h8Q6FwivQ/RitIj3boewruIF9GqRtYyay/EpxZc=",
+    "AzZeGJ3FEo84mdl0Onxzmyptd2XqzBIxLe81NanaSDo=",
+    "BhyBSdqLENUYxaT6Yofn1BmS8Dv7fJPXiEbDV8TKDi4=",
+    "Akgl7iELU9xYPgI/Nl/e9JG4RL4t1B59xyydCC8lLZA=",
+    "AHXd/Z2T0Sg3f64uSMjxMi5rNYRKK1p+lisSipxPjdg=",
+    "BMM/WrxnQsZHyTy+Fag8B+02W7Nb9wmTxdF50gQBk8k=",
+    "CHbSObY35pP3LnmBDmWzyrOgLgUFFH9H5/wexCzw1Eo=",
+    "Ehcc9HEe8KVedvEHDWXwrQNReBinOpLZkZUnclS3PFk=",
+    "BeRcj588QTIojPhzAxXGJMZldNoWQOcOZF+BcGwK5S0=",
+    "Dgvrqvj+IxrTUsNNzrmqaFaisVIXM1OLVPzShv3V/Bw=",
+    "D9EuihtO3WVl/GL9onk0cTFhCYSOsLanwmIhawpXqc0=",
+    "DlT+DTL/K8nOHPrvVY0ENxmBp0iHzQZZ7yDHWFeZ9FE=",
+    "B0hEkUoNHvaWqR2wQ+LZFxFPGiFWy9GICqrfU23a0dI=",
+    "D2FEKTvdETrcSz4EkmZvAPeOGSqr5IsVUUIfxW0mqEk=",
+    "CjFTWZHeiZ/2/bCk2yoMQ+1WycPfDb3btdrf0fEyQQA=",
+    "CGS2H5C8/SGbzD8gaph6t3UxAPM315JS+UFjLZzug6s="
+  ],
+  "Spent": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ]
+}

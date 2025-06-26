@@ -60,6 +60,8 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 		return nil, err
 	}
 
+	fmt.Printf("[Register] txIn: %+v\n", txIn)
+
 	// Step 4: Sample r_enc (b, r) for encryption randomness (already in CreateTx logic)
 	// Step 5: Compute c^Aux = MiMC-based encryption using DH shared key
 	// For registration, encrypt (coins, energy, bid, sk_in, pk_out)
