@@ -10,11 +10,17 @@ require (
 require (
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
+	github.com/fatih/color v1.18.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
 	github.com/google/pprof v0.0.0-20250607225305-033d6d78b36a // indirect
 	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/olekukonko/errors v0.0.0-20250405072817-4e6d85265da6 // indirect
+	github.com/olekukonko/ll v0.0.8 // indirect
+	github.com/olekukonko/tablewriter v1.0.7 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/ronanh/intcomp v1.1.1 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

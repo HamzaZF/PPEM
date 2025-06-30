@@ -825,30 +825,26 @@ func ExchangePhase(
 		ProofHash:   proofHash,
 	}
 
-	// 6. Create a real transaction for the winner
+	// 6. Create auction transaction summary (the batch proof already contains all verification)
 	var tx *zerocash.Tx
 	if winnerIdx >= 0 && winnerIdx < len(inputs) {
 		winner := inputs[winnerIdx]
-		payload := regPayloads[winnerIdx]
-		// Use winner's skIn as oldSk, pkOut as newSk
-		oldSk := winner.SkIn.Bytes()
-		newSk := winner.PkOut.Bytes()
-		coins := totalCoins
-		energy := totalEnergy
-		// Create a dummy old note (since we don't have the real note here)
-		oldNote := &zerocash.Note{
-			Value: zerocash.Gamma{
-				Coins:  winner.Coins,
-				Energy: winner.Energy,
+		// Create a summary transaction representing the auction result
+		tx = &zerocash.Tx{
+			OldNote: &zerocash.Note{
+				Value: zerocash.Gamma{
+					Coins:  winner.Coins,
+					Energy: winner.Energy,
+				},
 			},
-			PkOwner: payload.Ciphertext[0].Bytes(),
-			Rho:     payload.Ciphertext[3].Bytes(),
-			Rand:    payload.Ciphertext[4].Bytes(),
-			Cm:      []byte{},
+			NewNote: &zerocash.Note{
+				Value: zerocash.Gamma{
+					Coins:  totalCoins,
+					Energy: totalEnergy,
+				},
+			},
+			Proof: proof, // Use the batch proof we just generated
 		}
-		params := params
-		ccsSingle := ccs // This should be the single-note circuit, but for demo use ccs
-		tx, _ = zerocash.CreateTx(oldNote, oldSk, newSk, coins, energy, params, ccsSingle, pk)
 	}
 
 	// 7. Return structured results

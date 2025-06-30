@@ -123,3 +123,83 @@ func EncZK(api frontend.API, pk, coins, energy, rho, rand, cm frontend.Variable,
 
 	return []frontend.Variable{pk_enc, coins_enc, energy_enc, rho_enc, rand_enc, cm_enc}
 }
+
+// CircuitTx10 implements a batched Zerocash transaction circuit for N=10 notes.
+// This is identical to CircuitTx but vectorized for 10 notes, used in the auction phase.
+type CircuitTx10 struct {
+	// Public inputs (arrays of length 10)
+	OldCoin   [10]frontend.Variable    `gnark:",public"`
+	OldEnergy [10]frontend.Variable    `gnark:",public"`
+	CmOld     [10]frontend.Variable    `gnark:",public"`
+	SnOld     [10]frontend.Variable    `gnark:",public"`
+	PkOld     [10]frontend.Variable    `gnark:",public"`
+	NewCoin   [10]frontend.Variable    `gnark:",public"`
+	NewEnergy [10]frontend.Variable    `gnark:",public"`
+	CmNew     [10]frontend.Variable    `gnark:",public"`
+	CNew      [10][6]frontend.Variable `gnark:",public"`
+	G         sw_bls12377.G1Affine     `gnark:",public"`
+	G_b       sw_bls12377.G1Affine     `gnark:",public"`
+	G_r       [10]sw_bls12377.G1Affine `gnark:",public"`
+
+	// Private inputs (arrays of length 10)
+	SkOld   [10]frontend.Variable
+	RhoOld  [10]frontend.Variable
+	RandOld [10]frontend.Variable
+	PkNew   [10]frontend.Variable
+	RhoNew  [10]frontend.Variable
+	RandNew [10]frontend.Variable
+	R       [10]frontend.Variable
+	EncKey  [10]sw_bls12377.G1Affine
+}
+
+func (c *CircuitTx10) Define(api frontend.API) error {
+	// Apply all CircuitTx constraints element-wise for each of the 10 notes
+	for i := 0; i < 10; i++ {
+		// Step 1: Serial number (snOld = PRF(skOld, rhoOld)) for note i
+		snComputed := PRF(api, c.SkOld[i], c.RhoOld[i])
+		api.AssertIsEqual(c.SnOld[i], snComputed)
+
+		// Step 2: rhoNew = H(snOld) for note i
+		hasher, _ := mimc.NewMiMC(api)
+		hasher.Write(snComputed)
+		rhoNewComputed := hasher.Sum()
+		api.AssertIsEqual(c.RhoNew[i], rhoNewComputed)
+
+		// Step 4: Commitment (cmNew = Com(coins, energy, rhoNew, randNew)) for note i
+		hasher.Reset()
+		hasher.Write(c.NewCoin[i])
+		hasher.Write(c.NewEnergy[i])
+		hasher.Write(c.RhoNew[i])
+		hasher.Write(c.RandNew[i])
+		cmNewComputed := hasher.Sum()
+		api.AssertIsEqual(c.CmNew[i], cmNewComputed)
+
+		// Step 6: Encryption (cNew = Enc(pkNew, coins, energy, rhoNew, randNew, cmNew, encKey)) for note i
+		encVal := EncZK(api, c.PkNew[i], c.NewCoin[i], c.NewEnergy[i], c.RhoNew[i], c.RandNew[i], c.CmNew[i], c.EncKey[i])
+		for j := 0; j < 6; j++ {
+			api.AssertIsEqual(c.CNew[i][j], encVal[j])
+		}
+
+		// Step 7: Value conservation for note i
+		api.AssertIsEqual(c.OldCoin[i], c.NewCoin[i])
+		api.AssertIsEqual(c.OldEnergy[i], c.NewEnergy[i])
+
+		// Key derivations for encryption for note i
+		G_r_b := new(sw_bls12377.G1Affine)
+		G_r_b.ScalarMul(api, c.G_b, c.R[i])
+		api.AssertIsEqual(c.EncKey[i].X, G_r_b.X)
+		api.AssertIsEqual(c.EncKey[i].Y, G_r_b.Y)
+		G_r := new(sw_bls12377.G1Affine)
+		G_r.ScalarMul(api, c.G, c.R[i])
+		api.AssertIsEqual(c.G_r[i].X, G_r.X)
+		api.AssertIsEqual(c.G_r[i].Y, G_r.Y)
+
+		// Public key derivation (pkOld = H(skOld)) for note i
+		hasher.Reset()
+		hasher.Write(c.SkOld[i])
+		pkOldComputed := hasher.Sum()
+		api.AssertIsEqual(c.PkOld[i], pkOldComputed)
+	}
+
+	return nil
+}

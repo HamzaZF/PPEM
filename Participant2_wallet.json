@@ -125,6 +125,26 @@
       "Rho": "G2ais1hqQpYK3XURN6G6ywtl5+njo+t5tOFGzzYH17Q=",
       "Rand": "nKYeHgNi/mfvLCYgcHHGaEeMPtroq9BoTX/HiXRb8As=",
       "Cm": "ACfBbzWWamlV4G6SouYFESKjYrb60v8hX1RsLMCaGr2uJsiSlspBdi3+Rj36ARue"
+    },
+    {
+      "Value": {
+        "Coins": 150,
+        "Energy": 75
+      },
+      "PkOwner": "ASmoXJ9k0WB6ltnGQrd3KMfzSOCpYiW0zx4d7ACScKy+ThiGsnLX26jSmhB6m5bx",
+      "Rho": "Va66RS4OitQEkYxCu9owO9TBA9MuKQTPZYR8jNw9Soc=",
+      "Rand": "yaml3eDPZjpu30CKMRwpByahSOtSeMgzQDREbRGMjc0=",
+      "Cm": "AHFqo9/0Hb2b8T//TTz21wptfHThx9Tdqno2wvLTYcIaJvT6ITK/0cUjhHZdZH3+"
+    },
+    {
+      "Value": {
+        "Coins": 150,
+        "Energy": 75
+      },
+      "PkOwner": "AUX8Cxy6/JNijdEAKUHJe7jSuK8enFdtGBgEa7woPSVxXanVMWrUs/Evdju3f2Z7",
+      "Rho": "7u3KHf0qDNeSjEBYnfgH4JayXpivn2wWFuEmuBpFVeM=",
+      "Rand": "rM4eu2ed7UKUmnXHFkpUkCVQc/RHQVJPmkrtq7ip18U=",
+      "Cm": "ANuyFQSMzLA7/RzfG8cptoeEx3VOGwNJOhLeOv61UXjmSNa7foQwc7TOwrN0zcrc"
     }
   ],
   "NoteKeys": [
@@ -139,9 +159,13 @@
     "CgXrkBJljG/jMqRHa7NXFdbO4TtodFTnEoxcWIdeF08=",
     "A2+ccwMPALV43a4TrbviW9Y0qomnGeVd0/aKpD1N/4w=",
     "B1Adaukrm6vG45vUzF2vEGW3uSaPwP4uVTXJtADqaYM=",
-    "AzcgThUvn+70t3GRwryrP5trXZnsAQFo3vITekL1rHc="
+    "AzcgThUvn+70t3GRwryrP5trXZnsAQFo3vITekL1rHc=",
+    "Bjncm5GXr5QwZnXSTNq/Ri36QYbwCYiAHa1O1T82e7w=",
+    "A32kgdOFVhaxiiknMlBIP/YJzeyTyXjWCf7Ezdn/vI8="
   ],
   "Spent": [
+    false,
+    false,
     false,
     false,
     false,
@@ -156,6 +180,24 @@
     false
   ],
   "CAux": [
+    [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
     [
       [
         0,
@@ -385,6 +427,26 @@
       "Rho": "G2ais1hqQpYK3XURN6G6ywtl5+njo+t5tOFGzzYH17Q=",
       "Rand": "nKYeHgNi/mfvLCYgcHHGaEeMPtroq9BoTX/HiXRb8As=",
       "Cm": "ACfBbzWWamlV4G6SouYFESKjYrb60v8hX1RsLMCaGr2uJsiSlspBdi3+Rj36ARue"
+    },
+    {
+      "Value": {
+        "Coins": 150,
+        "Energy": 75
+      },
+      "PkOwner": "ASmoXJ9k0WB6ltnGQrd3KMfzSOCpYiW0zx4d7ACScKy+ThiGsnLX26jSmhB6m5bx",
+      "Rho": "Va66RS4OitQEkYxCu9owO9TBA9MuKQTPZYR8jNw9Soc=",
+      "Rand": "yaml3eDPZjpu30CKMRwpByahSOtSeMgzQDREbRGMjc0=",
+      "Cm": "AHFqo9/0Hb2b8T//TTz21wptfHThx9Tdqno2wvLTYcIaJvT6ITK/0cUjhHZdZH3+"
+    },
+    {
+      "Value": {
+        "Coins": 150,
+        "Energy": 75
+      },
+      "PkOwner": "AUX8Cxy6/JNijdEAKUHJe7jSuK8enFdtGBgEa7woPSVxXanVMWrUs/Evdju3f2Z7",
+      "Rho": "7u3KHf0qDNeSjEBYnfgH4JayXpivn2wWFuEmuBpFVeM=",
+      "Rand": "rM4eu2ed7UKUmnXHFkpUkCVQc/RHQVJPmkrtq7ip18U=",
+      "Cm": "ANuyFQSMzLA7/RzfG8cptoeEx3VOGwNJOhLeOv61UXjmSNa7foQwc7TOwrN0zcrc"
     }
   ]
 }

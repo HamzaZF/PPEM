@@ -1,0 +1,49 @@
+{
+  "Name": "Participant_08",
+  "Sk": "6991007797270554834744205437774053473347888503120348843949930328645027346399",
+  "Pk": {
+    "X": "36657764028107735982083167828401335041595311493797398926108693266631749791335112228702824199558658995310752415778",
+    "Y": "67251901309309318136609763995993613373742903818490320824427193621144282046718711960012047962345252922839552651010"
+  },
+  "Notes": [
+    {
+      "Value": {
+        "Coins": 6463,
+        "Energy": 369
+      },
+      "PkOwner": "AAyIC60dEPFKyG6C0oeXqsxWmvPaPcNzgDVVUmCgIv04MG5Ycl6V2cckNqM6/mXK",
+      "Rho": "Gh3DvAfc44eCfzqBOLtqS1urvmzpgzhvj10IH+sLS4c=",
+      "Rand": "59TGVZkt++Omd+LC4aHaH0+GHnmnq9RJDAksBQ41U68=",
+      "Cm": "AVl4efnCR6rPHgWd38JkrNcV+cmpIS2HocysbmrUny7f7+wcBDvoLFpkEDlEBRKi"
+    }
+  ],
+  "NoteKeys": [
+    "AYGEr6l/rhRFQfKeuSKIVBdmXhyVwofsw/G9cTH8QS4="
+  ],
+  "Spent": [
+    false
+  ],
+  "CAux": [
+    [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  ],
+  "WithdrawOutNote": [
+    {
+      "Value": {
+        "Coins": 6463,
+        "Energy": 369
+      },
+      "PkOwner": "AAyIC60dEPFKyG6C0oeXqsxWmvPaPcNzgDVVUmCgIv04MG5Ycl6V2cckNqM6/mXK",
+      "Rho": "Gh3DvAfc44eCfzqBOLtqS1urvmzpgzhvj10IH+sLS4c=",
+      "Rand": "59TGVZkt++Omd+LC4aHaH0+GHnmnq9RJDAksBQ41U68=",
+      "Cm": "AVl4efnCR6rPHgWd38JkrNcV+cmpIS2HocysbmrUny7f7+wcBDvoLFpkEDlEBRKi"
+    }
+  ]
+}
