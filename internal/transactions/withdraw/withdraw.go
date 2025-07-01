@@ -37,7 +37,7 @@ func PRFGo(sk, rho *big.Int) *big.Int {
 }
 
 // BuildWithdrawWitness constructs the witness for CircuitWithdraw
-func BuildWithdrawWitness(nIn Note, skIn, rEnc *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int) *CircuitWithdraw {
+func BuildWithdrawWitness(nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int, bid *big.Int) *CircuitWithdraw {
 	w := &CircuitWithdraw{}
 	w.SnIn = PRFGo(skIn, nIn.Rho)
 	w.CmOut = nOut.Cm
@@ -46,7 +46,7 @@ func BuildWithdrawWitness(nIn Note, skIn, rEnc *big.Int, nOut Note, pkT sw_bls12
 		w.CipherAux[i] = cipherAux[i]
 	}
 	w.SkIn = skIn
-	w.REnc = rEnc
+	w.Bid = bid // bid value is required for Algorithm 4
 	w.NIn.Coins = nIn.Coins
 	w.NIn.Energy = nIn.Energy
 	w.NIn.PkIn = nIn.Pk
@@ -64,10 +64,10 @@ func BuildWithdrawWitness(nIn Note, skIn, rEnc *big.Int, nOut Note, pkT sw_bls12
 
 // Withdraw runs the withdrawal protocol, returns tx and proof
 func Withdraw(
-	nIn Note, skIn, rEnc *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int,
+	nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int, bid *big.Int,
 	pk groth16.ProvingKey, ccs constraint.ConstraintSystem,
 ) (*WithdrawTx, []byte, error) {
-	witness := BuildWithdrawWitness(nIn, skIn, rEnc, nOut, pkT, cipherAux)
+	witness := BuildWithdrawWitness(nIn, skIn, nOut, pkT, cipherAux, bid)
 	gnarkWitness, err := frontend.NewWitness(witness, nil)
 	if err != nil {
 		return nil, nil, err

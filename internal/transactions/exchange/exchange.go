@@ -9,6 +9,7 @@ package exchange
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"crypto/sha256"
 	"fmt"
 	"math/big"
@@ -27,22 +28,24 @@ import (
 	"implementation/internal/zerocash"
 )
 
-// RegistrationPayload represents a participant's registration ciphertext and public key.
+// RegistrationPayload represents decrypted registration data from a participant
 type RegistrationPayload struct {
 	Ciphertext [5]*big.Int           // (pkOut, skIn, bid, coins, energy)
 	PubKey     *sw_bls12377.G1Affine // Participant's public key (for DH)
+	TxNoteData []byte                // Encrypted note data from CreateTx (new field)
 }
 
-// DecryptedRegistration holds the decrypted registration data for a participant.
+// DecryptedRegistration holds the decrypted data from registration
 type DecryptedRegistration struct {
-	PkOut  *big.Int
-	SkIn   *big.Int
-	Bid    *big.Int
-	Coins  *big.Int
-	Energy *big.Int
+	PkOut    *big.Int
+	SkIn     *big.Int
+	Bid      *big.Int
+	Coins    *big.Int
+	Energy   *big.Int
+	NoteData *zerocash.Note // Decrypted note from CreateTx (new field)
 }
 
-// DecryptAllRegistrations decrypts all registration payloads using the auctioneer's DH secret.
+// DecryptAllRegistrations decrypts all registration payloads using the auctioneer's private key
 func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.Int) ([]DecryptedRegistration, error) {
 	results := make([]DecryptedRegistration, len(payloads))
 
@@ -50,12 +53,12 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 	var sk bls12377_fr.Element
 	sk.SetBigInt(auctioneerSk)
 
-	for i, p := range payloads {
+	for i, payload := range payloads {
 		// Convert participant's public key from gnark format to native BLS12-377
 		pkX := new(big.Int)
-		pkX.SetString(p.PubKey.X.(string), 10)
+		pkX.SetString(payload.PubKey.X.(string), 10)
 		pkY := new(big.Int)
-		pkY.SetString(p.PubKey.Y.(string), 10)
+		pkY.SetString(payload.PubKey.Y.(string), 10)
 
 		var pk bls12377.G1Affine
 		pk.X.SetBigInt(pkX)
@@ -64,17 +67,53 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 		// Compute DH shared secret: shared = pk^sk
 		shared := zerocash.ComputeDHShared(&sk, &pk)
 
-		// Decrypt using the shared secret
-		dec := DecZKRegGo(p.Ciphertext, *shared)
+		// Decrypt the registration data using the shared secret
+		decrypted := DecZKRegGo(payload.Ciphertext, *shared)
 
-		results[i] = DecryptedRegistration{
-			PkOut:  dec[0],
-			SkIn:   dec[1],
-			Bid:    dec[2],
-			Coins:  dec[3],
-			Energy: dec[4],
+		result := DecryptedRegistration{
+			PkOut:  decrypted[0], // pk^out
+			SkIn:   decrypted[1], // sk^in
+			Bid:    decrypted[2], // bid
+			Coins:  decrypted[3], // coins
+			Energy: decrypted[4], // energy
 		}
+
+		// NEW: Decrypt the note data from CreateTx if present
+		if len(payload.TxNoteData) > 0 {
+			// This requires the auctioneer's ECDH private key - we'll need to add this to the function
+			// For now, store the encrypted data and decrypt it later
+			// result.NoteData = payload.TxNoteData
+		}
+
+		results[i] = result
 	}
+
+	return results, nil
+}
+
+// DecryptTransactionNotes decrypts the note data from transactions using ECDH private key
+func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivKey *ecdh.PrivateKey) ([]DecryptedRegistration, error) {
+	results := make([]DecryptedRegistration, len(payloads))
+
+	for i, payload := range payloads {
+		result := DecryptedRegistration{}
+
+		// Decrypt transaction note data if present
+		if len(payload.TxNoteData) > 0 {
+			noteData, err := zerocash.DecryptNoteFromAuctioneer(payload.TxNoteData, auctioneerECDHPrivKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt note data for participant %d: %w", i, err)
+			}
+			result.NoteData = noteData
+
+			// Extract values from the decrypted note
+			result.Coins = noteData.Value.Coins
+			result.Energy = noteData.Value.Energy
+		}
+
+		results[i] = result
+	}
+
 	return results, nil
 }
 
@@ -598,19 +637,11 @@ func validateExchangeInputs(
 	return nil
 }
 
-// ExchangePhase runs the auction phase as per Algorithm 3 (without ZKP-enforced auction logic).
-// Algorithm 3 inputs as per paper: (regPayloads, auctioneerSk, ledger, params, pk, ccs)
-//   - regPayloads: Registration payloads (ciphertexts + pubkeys)
-//   - auctioneerSk: Auctioneer's DH secret key
-//   - ledger: Current ledger state (commitment list, serial number list)
-//   - params: Zerocash params
-//   - pk: Proving key for CircuitTxF10
-//   - ccs: Compiled constraint system for CircuitTxF10
-//
-// Returns: (txOut, info, proof, error)
-func ExchangePhase(
+// Updated ExchangePhase that handles both registration data and transaction notes
+func ExchangePhaseWithNotes(
 	regPayloads []RegistrationPayload,
 	auctioneerSk *big.Int,
+	auctioneerECDHPrivKey *ecdh.PrivateKey,
 	ledger *zerocash.Ledger,
 	params *zerocash.Params,
 	pk groth16.ProvingKey,
@@ -620,38 +651,54 @@ func ExchangePhase(
 	if err := validateExchangeInputs(regPayloads, auctioneerSk, ledger, params, pk, ccs); err != nil {
 		return nil, nil, nil, fmt.Errorf("input validation failed: %w", err)
 	}
+	if auctioneerECDHPrivKey == nil {
+		return nil, nil, nil, fmt.Errorf("auctioneer ECDH private key is required")
+	}
 
-	// 1. Validate against ledger - check that all input commitments exist and are unspent
-	for i, payload := range regPayloads {
-		// Decrypt to get the commitment data for validation
-		_, err := DecryptAllRegistrations([]RegistrationPayload{payload}, auctioneerSk)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to decrypt payload %d: %w", i, err)
+	// 1. Decrypt registration data (from Algorithm 2 - DH+OTP encryption)
+	regInputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to decrypt registration data: %w", err)
+	}
+
+	// 2. Decrypt transaction note data (from Algorithm 1 - ECDH+AES encryption)
+	noteInputs, err := DecryptTransactionNotes(regPayloads, auctioneerECDHPrivKey)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to decrypt transaction notes: %w", err)
+	}
+
+	// 3. Merge the decrypted data
+	inputs := make([]DecryptedRegistration, len(regPayloads))
+	for i := 0; i < len(regPayloads); i++ {
+		inputs[i] = DecryptedRegistration{
+			PkOut:    regInputs[i].PkOut,
+			SkIn:     regInputs[i].SkIn,
+			Bid:      regInputs[i].Bid,
+			Coins:    regInputs[i].Coins,
+			Energy:   regInputs[i].Energy,
+			NoteData: noteInputs[i].NoteData, // Note data from CreateTx
 		}
 
-		// For now, we trust the registration phase has validated commitments
-		// In a full implementation, we would verify cm ∈ ledger.CmList here
+		// Override with note data if available (note data is more accurate)
+		if noteInputs[i].NoteData != nil {
+			inputs[i].Coins = noteInputs[i].NoteData.Value.Coins
+			inputs[i].Energy = noteInputs[i].NoteData.Value.Energy
+		}
 	}
 
-	// 2. Decrypt all registration payloads
-	inputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// 3. Run auction logic - sophisticated sealed-bid double auction mechanism
+	// 4. Run auction logic - sophisticated sealed-bid double auction mechanism
 	outputs := RunAuctionLogic(inputs)
 
-	// 4. Build witness for CircuitTxF10
+	// 5. Build witness for CircuitTxF10
 	witness := BuildWitnessF10(inputs, outputs, regPayloads, auctioneerSk)
 
-	// 5. Generate ZKP using CircuitTxF10
+	// 6. Generate ZKP using CircuitTxF10
 	proof, err = GenerateProofF10(witness, pk, ccs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// 6. Create structured output
+	// 7. Create structured output
 	timestamp := time.Now().Unix()
 
 	// Calculate totals from inputs
@@ -687,6 +734,6 @@ func ExchangePhase(
 		ProofHash:   proofHash,
 	}
 
-	// 7. Return structured results
+	// 8. Return structured results
 	return nil, auctionResult, proof, nil
 }

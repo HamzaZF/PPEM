@@ -2,6 +2,7 @@ package register
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"errors"
 	"math/big"
 
@@ -27,14 +28,18 @@ type RegisterResult struct {
 
 // Algorithm 2: Register(n^base, Γ^in, b_i) → (C^Aux, tx^in, info_bid, π_reg)
 // Follows the paper exactly, excluding r_enc for DH-OTP encryption
+// auctioneerECDHPubKey: Auctioneer's ECDH public key for note encryption in CreateTx
 func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.Int,
 	pkTx groth16.ProvingKey, ccsTx constraint.ConstraintSystem,
 	pkReg groth16.ProvingKey, ccsReg constraint.ConstraintSystem,
-	skBytes []byte) (*RegisterResult, error) {
+	skBytes []byte, auctioneerECDHPubKey *ecdh.PublicKey) (*RegisterResult, error) {
 
 	// Validate inputs according to paper
 	if participant.AuctioneerPub == nil {
 		return nil, errors.New("participant.AuctioneerPub is nil; auctioneer public key required")
+	}
+	if auctioneerECDHPubKey == nil {
+		return nil, errors.New("auctioneer ECDH public key is nil")
 	}
 
 	// Step 1: Generate sk^in, Compute pk^in = KeyGen(sk^in)
@@ -52,7 +57,7 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	energy := note.Value.Energy
 	pkInBytes := pkIn.Bytes()
 
-	txIn, err := zerocash.CreateTx(note, skBytes, pkInBytes, coins, energy, participant.Params, ccsTx, pkTx)
+	txIn, err := zerocash.CreateTx(note, skBytes, pkInBytes, coins, energy, participant.Params, ccsTx, pkTx, auctioneerECDHPubKey)
 	if err != nil {
 		return nil, errors.New("Algorithm 1 (Transaction) failed: " + err.Error())
 	}

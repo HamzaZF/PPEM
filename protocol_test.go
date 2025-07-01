@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
 	"math/big"
 	"testing"
 	"time"
@@ -302,7 +304,13 @@ func TestAlgorithm1Transaction(t *testing.T) {
 		pkNew := zerocash.MimcHashPublic(newSk).Bytes() // Compute pk from sk as per Algorithm 1
 		params := &zerocash.Params{}
 
-		tx, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, ccs, pk)
+		// Generate ECDH key pair for auctioneer
+		_, auctioneerECDHPub, err := generateECDHKeyPair()
+		if err != nil {
+			t.Fatalf("ECDH key generation failed: %v", err)
+		}
+
+		tx, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, ccs, pk, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("Transaction creation failed: %v", err)
 		}
@@ -327,7 +335,13 @@ func TestAlgorithm1Transaction(t *testing.T) {
 		pkNew := zerocash.MimcHashPublic(newSk).Bytes()
 		params := &zerocash.Params{}
 
-		_, err := zerocash.CreateTx(note, wrongSk, pkNew, coins, energy, params, ccs, pk)
+		// Generate ECDH key pair for auctioneer
+		_, auctioneerECDHPub, err := generateECDHKeyPair()
+		if err != nil {
+			t.Fatalf("ECDH key generation failed: %v", err)
+		}
+
+		_, err = zerocash.CreateTx(note, wrongSk, pkNew, coins, energy, params, ccs, pk, auctioneerECDHPub)
 		if err == nil {
 			t.Error("Transaction with wrong secret key should have failed")
 		}
@@ -345,7 +359,13 @@ func TestAlgorithm1Transaction(t *testing.T) {
 		pkNew1 := zerocash.MimcHashPublic(newSk1).Bytes()
 		params := &zerocash.Params{}
 
-		tx1, err := zerocash.CreateTx(note, sk, pkNew1, coins, energy, params, ccs, pk)
+		// Generate ECDH key pair for auctioneer
+		_, auctioneerECDHPub, err := generateECDHKeyPair()
+		if err != nil {
+			t.Fatalf("ECDH key generation failed: %v", err)
+		}
+
+		tx1, err := zerocash.CreateTx(note, sk, pkNew1, coins, energy, params, ccs, pk, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("First transaction creation failed: %v", err)
 		}
@@ -353,7 +373,7 @@ func TestAlgorithm1Transaction(t *testing.T) {
 		// Create second transaction with same note (double spending)
 		newSk2 := zerocash.RandomBytesPublic(32)
 		pkNew2 := zerocash.MimcHashPublic(newSk2).Bytes()
-		tx2, err := zerocash.CreateTx(note, sk, pkNew2, coins, energy, params, ccs, pk)
+		tx2, err := zerocash.CreateTx(note, sk, pkNew2, coins, energy, params, ccs, pk, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("Second transaction creation failed: %v", err)
 		}
@@ -396,8 +416,14 @@ func TestAlgorithm2Register(t *testing.T) {
 		note := zerocash.NewNote(coins, energy, sk)
 		bid := big.NewInt(25)
 
+		// Generate ECDH key pair for auctioneer
+		_, auctioneerECDHPub, err := generateECDHKeyPair()
+		if err != nil {
+			t.Fatalf("ECDH key generation failed: %v", err)
+		}
+
 		// Execute registration
-		result, err := register.Register(participant, note, bid, pkTx, ccsTx, pkReg, ccsReg, sk)
+		result, err := register.Register(participant, note, bid, pkTx, ccsTx, pkReg, ccsReg, sk, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("Registration failed: %v", err)
 		}
@@ -446,8 +472,14 @@ func TestAlgorithm2Register(t *testing.T) {
 		note := zerocash.NewNote(coins, energy, sk)
 		bid := big.NewInt(25)
 
+		// Generate ECDH key pair for auctioneer
+		_, auctioneerECDHPub, err := generateECDHKeyPair()
+		if err != nil {
+			t.Fatalf("ECDH key generation failed: %v", err)
+		}
+
 		// Registration should fail
-		_, err := register.Register(participant, note, bid, pkTx, ccsTx, pkReg, ccsReg, sk)
+		_, err = register.Register(participant, note, bid, pkTx, ccsTx, pkReg, ccsReg, sk, auctioneerECDHPub)
 		if err == nil {
 			t.Error("Registration should fail with missing auctioneer public key")
 		}
@@ -463,6 +495,7 @@ func TestAlgorithm3Exchange(t *testing.T) {
 	t.Run("Valid Exchange with Multiple Participants", func(t *testing.T) {
 		// Create auctioneer
 		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
+		auctioneerECDHPriv, _, _ := generateECDHKeyPair()
 
 		// Create registration payloads for 3 participants
 		regPayloads := make([]exchange.RegistrationPayload, 3)
@@ -482,6 +515,7 @@ func TestAlgorithm3Exchange(t *testing.T) {
 			regPayloads[i] = exchange.RegistrationPayload{
 				Ciphertext: ciphertext,
 				PubKey:     convertToGnarkPoint(participantKp.Pk),
+				TxNoteData: []byte{}, // Empty for test
 			}
 		}
 
@@ -490,7 +524,7 @@ func TestAlgorithm3Exchange(t *testing.T) {
 		params := &zerocash.Params{}
 
 		// Execute exchange
-		txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneerKp.Sk.BigInt(new(big.Int)), ledger, params, pkF10, ccsF10)
+		txOut, info, proof, err := exchange.ExchangePhaseWithNotes(regPayloads, auctioneerKp.Sk.BigInt(new(big.Int)), auctioneerECDHPriv, ledger, params, pkF10, ccsF10)
 		if err != nil {
 			t.Fatalf("Exchange failed: %v", err)
 		}
@@ -512,10 +546,11 @@ func TestAlgorithm3Exchange(t *testing.T) {
 		var regPayloads []exchange.RegistrationPayload
 
 		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
+		auctioneerECDHPriv, _, _ := generateECDHKeyPair()
 		ledger := zerocash.NewLedger()
 		params := &zerocash.Params{}
 
-		_, _, _, err := exchange.ExchangePhase(regPayloads, auctioneerKp.Sk.BigInt(new(big.Int)), ledger, params, pkF10, ccsF10)
+		_, _, _, err := exchange.ExchangePhaseWithNotes(regPayloads, auctioneerKp.Sk.BigInt(new(big.Int)), auctioneerECDHPriv, ledger, params, pkF10, ccsF10)
 		if err == nil {
 			t.Error("Exchange should fail with empty payloads")
 		}
@@ -550,7 +585,7 @@ func TestAlgorithm4Withdraw(t *testing.T) {
 		}
 
 		skIn := big.NewInt(12345)
-		rEnc := big.NewInt(789)
+		bid := big.NewInt(25) // bid value instead of rEnc
 
 		// Create participant's public key
 		participantKp, _ := zerocash.GenerateDHKeyPair()
@@ -565,8 +600,8 @@ func TestAlgorithm4Withdraw(t *testing.T) {
 			cipherAux[i] = big.NewInt(int64(1000 + i))
 		}
 
-		// Execute withdrawal
-		tx, proof, err := withdraw.Withdraw(nIn, skIn, rEnc, nOut, pkT, cipherAux, pkWithdraw, ccsWithdraw)
+		// Execute withdrawal with correct parameter order
+		tx, proof, err := withdraw.Withdraw(nIn, skIn, nOut, pkT, cipherAux, bid, pkWithdraw, ccsWithdraw)
 		if err != nil {
 			t.Fatalf("Withdrawal failed: %v", err)
 		}
@@ -600,6 +635,7 @@ func TestFullProtocolFlow(t *testing.T) {
 
 		// Create auctioneer
 		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
+		auctioneerECDHPriv, auctioneerECDHPub, _ := generateECDHKeyPair()
 		params := &zerocash.Params{}
 		auctioneer := &zerocash.Participant{
 			Name:   "Auctioneer",
@@ -641,7 +677,7 @@ func TestFullProtocolFlow(t *testing.T) {
 		for i := 0; i < N; i++ {
 			noteSecretKey := zerocash.RandomBytesPublic(32)
 			result, err := register.Register(participants[i], notes[i], bids[i],
-				setupKeys.pkTx, setupKeys.ccsTx, setupKeys.pkReg, setupKeys.ccsReg, noteSecretKey)
+				setupKeys.pkTx, setupKeys.ccsTx, setupKeys.pkReg, setupKeys.ccsReg, noteSecretKey, auctioneerECDHPub)
 			if err != nil {
 				t.Fatalf("Registration failed for participant %d: %v", i, err)
 			}
@@ -649,13 +685,14 @@ func TestFullProtocolFlow(t *testing.T) {
 			regPayloads[i] = exchange.RegistrationPayload{
 				Ciphertext: result.CAux,
 				PubKey:     convertToGnarkPoint(participants[i].Pk),
+				TxNoteData: result.TxIn.CNew, // Include encrypted note data
 			}
 		}
 
 		// Phase 2: Exchange
 		t.Logf("Starting exchange phase...")
 		ledger := zerocash.NewLedger()
-		txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)),
+		txOut, info, proof, err := exchange.ExchangePhaseWithNotes(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), auctioneerECDHPriv,
 			ledger, params, setupKeys.pkF10, setupKeys.ccsF10)
 		if err != nil {
 			t.Fatalf("Exchange phase failed: %v", err)
@@ -733,6 +770,59 @@ func TestPrivacyProperties(t *testing.T) {
 }
 
 func TestSecurityProperties(t *testing.T) {
+	t.Run("Bidder Anonymity", func(t *testing.T) {
+		// Test that bidder identities are hidden
+		// This involves testing that registration payloads don't reveal participant identity
+
+		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
+		participant1Kp, _ := zerocash.GenerateDHKeyPair()
+		participant2Kp, _ := zerocash.GenerateDHKeyPair()
+
+		// Create identical bids from different participants
+		coins := big.NewInt(100)
+		energy := big.NewInt(50)
+		bid := big.NewInt(25)
+		skIn := big.NewInt(12345)
+		pkOut := big.NewInt(67890)
+
+		// Encrypt for both participants using DH-OTP
+		shared1 := zerocash.ComputeDHShared(participant1Kp.Sk, auctioneerKp.Pk)
+		shared2 := zerocash.ComputeDHShared(participant2Kp.Sk, auctioneerKp.Pk)
+
+		cipher1 := register.EncryptRegistrationData(*shared1, coins, energy, bid, skIn, pkOut)
+		cipher2 := register.EncryptRegistrationData(*shared2, coins, energy, bid, skIn, pkOut)
+
+		// Ciphertexts should be different even with same inputs (privacy)
+		if cipher1[0].Cmp(cipher2[0]) == 0 && cipher1[1].Cmp(cipher2[1]) == 0 {
+			t.Error("Ciphertexts are identical - privacy violation")
+		}
+	})
+
+	t.Run("Bid Confidentiality", func(t *testing.T) {
+		// Test that bid amounts are hidden in ciphertexts
+		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
+		participantKp, _ := zerocash.GenerateDHKeyPair()
+
+		coins := big.NewInt(100)
+		energy := big.NewInt(50)
+		bid1 := big.NewInt(25)
+		bid2 := big.NewInt(50) // Different bid
+		skIn := big.NewInt(12345)
+		pkOut := big.NewInt(67890)
+
+		shared := zerocash.ComputeDHShared(participantKp.Sk, auctioneerKp.Pk)
+
+		cipher1 := register.EncryptRegistrationData(*shared, coins, energy, bid1, skIn, pkOut)
+		cipher2 := register.EncryptRegistrationData(*shared, coins, energy, bid2, skIn, pkOut)
+
+		// Bid field (index 2) should be different when encrypted
+		if cipher1[2].Cmp(cipher2[2]) == 0 {
+			t.Error("Same ciphertext for different bids - confidentiality violation")
+		}
+	})
+}
+
+func TestSecurityPropertiesFixed(t *testing.T) {
 	t.Run("Double Spending Prevention", func(t *testing.T) {
 		// This is already tested in Algorithm 1 tests, but we test at protocol level
 		ledger := zerocash.NewLedger()
@@ -746,17 +836,18 @@ func TestSecurityProperties(t *testing.T) {
 		// Create two transactions with the same note
 		setupKeys := setupAllCircuitKeys(t)
 		params := &zerocash.Params{}
+		_, auctioneerECDHPub, _ := generateECDHKeyPair()
 
 		newSk1 := zerocash.RandomBytesPublic(32)
 		pkNew1 := zerocash.MimcHashPublic(newSk1).Bytes()
-		tx1, err := zerocash.CreateTx(note, sk, pkNew1, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx)
+		tx1, err := zerocash.CreateTx(note, sk, pkNew1, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("First transaction creation failed: %v", err)
 		}
 
 		newSk2 := zerocash.RandomBytesPublic(32)
 		pkNew2 := zerocash.MimcHashPublic(newSk2).Bytes()
-		tx2, err := zerocash.CreateTx(note, sk, pkNew2, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx)
+		tx2, err := zerocash.CreateTx(note, sk, pkNew2, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("Second transaction creation failed: %v", err)
 		}
@@ -777,6 +868,7 @@ func TestSecurityProperties(t *testing.T) {
 	t.Run("Transaction Integrity", func(t *testing.T) {
 		// Test that tampered transactions are rejected
 		setupKeys := setupAllCircuitKeys(t)
+		_, auctioneerECDHPub, _ := generateECDHKeyPair()
 
 		coins := big.NewInt(100)
 		energy := big.NewInt(50)
@@ -786,7 +878,7 @@ func TestSecurityProperties(t *testing.T) {
 
 		newSk := zerocash.RandomBytesPublic(32)
 		pkNew := zerocash.MimcHashPublic(newSk).Bytes()
-		tx, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx)
+		tx, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx, auctioneerECDHPub)
 		if err != nil {
 			t.Fatalf("Transaction creation failed: %v", err)
 		}
@@ -818,6 +910,7 @@ func TestPerformanceBenchmarks(t *testing.T) {
 	}
 
 	setupKeys := setupAllCircuitKeys(t)
+	_, auctioneerECDHPub, _ := generateECDHKeyPair()
 
 	t.Run("Benchmark Transaction Creation", func(t *testing.T) {
 		coins := big.NewInt(100)
@@ -832,7 +925,7 @@ func TestPerformanceBenchmarks(t *testing.T) {
 		for i := 0; i < numTests; i++ {
 			newSk := zerocash.RandomBytesPublic(32)
 			pkNew := zerocash.MimcHashPublic(newSk).Bytes()
-			_, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx)
+			_, err := zerocash.CreateTx(note, sk, pkNew, coins, energy, params, setupKeys.ccsTx, setupKeys.pkTx, auctioneerECDHPub)
 			if err != nil {
 				t.Fatalf("Transaction %d failed: %v", i, err)
 			}
@@ -845,6 +938,7 @@ func TestPerformanceBenchmarks(t *testing.T) {
 	t.Run("Benchmark Registration", func(t *testing.T) {
 		auctioneerKp, _ := zerocash.GenerateDHKeyPair()
 		participantKp, _ := zerocash.GenerateDHKeyPair()
+		_, auctioneerECDHPub, _ := generateECDHKeyPair()
 
 		params := &zerocash.Params{}
 		participant := &zerocash.Participant{
@@ -864,7 +958,7 @@ func TestPerformanceBenchmarks(t *testing.T) {
 		numTests := 5 // Fewer tests as registration is more expensive
 
 		for i := 0; i < numTests; i++ {
-			_, err := register.Register(participant, note, bid, setupKeys.pkTx, setupKeys.ccsTx, setupKeys.pkReg, setupKeys.ccsReg, sk)
+			_, err := register.Register(participant, note, bid, setupKeys.pkTx, setupKeys.ccsTx, setupKeys.pkReg, setupKeys.ccsReg, sk, auctioneerECDHPub)
 			if err != nil {
 				t.Fatalf("Registration %d failed: %v", i, err)
 			}
@@ -943,4 +1037,13 @@ func convertToGnarkPoint(p *bls12377.G1Affine) *sw_bls12377.G1Affine {
 		X: p.X.String(),
 		Y: p.Y.String(),
 	}
+}
+
+// Helper function to generate ECDH key pair for note encryption
+func generateECDHKeyPair() (*ecdh.PrivateKey, *ecdh.PublicKey, error) {
+	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return privKey, privKey.PublicKey(), nil
 }

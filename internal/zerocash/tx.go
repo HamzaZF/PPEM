@@ -9,6 +9,12 @@ package zerocash
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdh"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -40,7 +46,7 @@ type Tx struct {
 	NewCoin   string
 	NewEnergy string
 	CmNew     string
-	CNew      [6]string
+	CNew      []byte // Encrypted note data using ECDH + AES (changed from [6]string)
 	G         sw_bls12377.G1Affine
 	G_b       sw_bls12377.G1Affine
 	G_r       sw_bls12377.G1Affine
@@ -49,7 +55,9 @@ type Tx struct {
 // CreateTx creates a new confidential transaction following Algorithm 1 from the paper.
 // Algorithm 1: Transaction([n_i^old]^n_{i=1}, [sk_i^old]^n_{i=1}, [Γ_j^new]^m_{j=1}, [pk_j]^m_{j=1}) → (tx)
 // Note: pk is passed as parameter, not computed inside (as per Algorithm 1)
-func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params *Params, ccs constraint.ConstraintSystem, pk groth16.ProvingKey) (*Tx, error) {
+// auctioneerECDHPubKey: Auctioneer's ECDH public key for note encryption
+func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params *Params,
+	ccs constraint.ConstraintSystem, pk groth16.ProvingKey, auctioneerECDHPubKey *ecdh.PublicKey) (*Tx, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("[PANIC RECOVERED] in CreateTx. Witness struct:")
@@ -71,10 +79,10 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 	// Step 3: Generate randomness for new note
 	randNew := randomBytes(32)
 
-	// Step 5: Compute commitment for new note following paper: cm = Com(Γ || pk || ρ, r)
+	// Step 4: Compute commitment for new note following paper: cm = Com(Γ || pk || ρ, r)
 	cmNew := Commitment(value, energy, pkNew, new(big.Int).SetBytes(rhoNew), new(big.Int).SetBytes(randNew))
 
-	// Step 6: Build new note
+	// Step 5: Build new note
 	newNote := &Note{
 		Value: Gamma{
 			Coins:  value,
@@ -86,7 +94,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		Cm:      cmNew,
 	}
 
-	// Step 7: Set up EC points for encryption (BLS12-377)
+	// Step 6: Set up EC points for ZK circuit (using DH protocol for circuit compatibility)
 	var g1Jac, _, _, _ = bls12377.Generators()
 	var g, g_b, g_r, encKey bls12377.G1Affine
 	var b, r bls12377_fp.Element
@@ -105,7 +113,13 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 	g_r.ScalarMultiplication(&g, r.BigInt(new(big.Int)))
 	encKey.ScalarMultiplication(&g_b, r.BigInt(new(big.Int)))
 
-	// Step 8: Encrypt new note data (see buildEncMimc)
+	// Step 7: Encrypt note data using ECDH + AES-256-GCM for auctioneer
+	encryptedNoteData, err := encryptNoteForAuctioneer(newNote, auctioneerECDHPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("note encryption failed: %w", err)
+	}
+
+	// Step 8: Build fake encrypted values for circuit compatibility (circuit expects [6]string)
 	encVals := buildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	var cNewStrs [6]string
@@ -165,7 +179,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		NewCoin:   newNote.Value.Coins.String(),
 		NewEnergy: newNote.Value.Energy.String(),
 		CmNew:     new(big.Int).SetBytes(newNote.Cm).String(),
-		CNew:      cNewStrs,
+		CNew:      encryptedNoteData, // Real encrypted note data for auctioneer
 		G:         toGnarkPoint(g),
 		G_b:       toGnarkPoint(g_b),
 		G_r:       toGnarkPoint(g_r),
@@ -357,4 +371,139 @@ func SetupOrLoadKeys(ccs constraint.ConstraintSystem, pkPath, vkPath string) (gr
 		return nil, nil, err
 	}
 	return pk, vk, nil
+}
+
+// encryptNoteForAuctioneer encrypts note data using ECDH + AES-256-GCM
+func encryptNoteForAuctioneer(note *Note, auctioneerECDHPubKey *ecdh.PublicKey) ([]byte, error) {
+	// 1. Generate ephemeral ECDH key pair
+	ephemeralPrivKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
+	}
+	ephemeralPubKey := ephemeralPrivKey.PublicKey()
+
+	// 2. Compute shared secret
+	sharedSecret, err := ephemeralPrivKey.ECDH(auctioneerECDHPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("ECDH computation failed: %w", err)
+	}
+
+	// 3. Derive AES key from shared secret
+	aesKey := sha256.Sum256(sharedSecret)
+
+	// 4. Prepare note data for encryption
+	noteData := map[string]interface{}{
+		"pk":     note.PkOwner,
+		"coins":  note.Value.Coins.String(),
+		"energy": note.Value.Energy.String(),
+		"rho":    note.Rho,
+		"rand":   note.Rand,
+		"cm":     note.Cm,
+	}
+
+	plaintextBytes, err := json.Marshal(noteData)
+	if err != nil {
+		return nil, fmt.Errorf("JSON marshaling failed: %w", err)
+	}
+
+	// 5. Encrypt with AES-256-GCM
+	aesCipher, err := aes.NewCipher(aesKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("AES cipher creation failed: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return nil, fmt.Errorf("GCM creation failed: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("nonce generation failed: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, plaintextBytes, nil)
+
+	// 6. Return (ephemeralPubKey + nonce + ciphertext)
+	ephemeralPubKeyBytes := ephemeralPubKey.Bytes()
+	result := make([]byte, 0, len(ephemeralPubKeyBytes)+len(nonce)+len(ciphertext))
+	result = append(result, ephemeralPubKeyBytes...)
+	result = append(result, nonce...)
+	result = append(result, ciphertext...)
+
+	return result, nil
+}
+
+// DecryptNoteFromAuctioneer decrypts note data using ECDH + AES-256-GCM
+func DecryptNoteFromAuctioneer(encryptedData []byte, auctioneerECDHPrivKey *ecdh.PrivateKey) (*Note, error) {
+	// 1. Extract ephemeral public key (first 65 bytes for P256 uncompressed)
+	if len(encryptedData) < 65 {
+		return nil, fmt.Errorf("encrypted data too short")
+	}
+
+	ephemeralPubKeyBytes := encryptedData[:65]
+	ephemeralPubKey, err := ecdh.P256().NewPublicKey(ephemeralPubKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ephemeral public key: %w", err)
+	}
+
+	// 2. Compute shared secret
+	sharedSecret, err := auctioneerECDHPrivKey.ECDH(ephemeralPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("ECDH computation failed: %w", err)
+	}
+
+	// 3. Derive AES key from shared secret
+	aesKey := sha256.Sum256(sharedSecret)
+
+	// 4. Create AES-GCM cipher
+	aesCipher, err := aes.NewCipher(aesKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("AES cipher creation failed: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return nil, fmt.Errorf("GCM creation failed: %w", err)
+	}
+
+	// 5. Extract nonce and ciphertext
+	remaining := encryptedData[65:]
+	if len(remaining) < gcm.NonceSize() {
+		return nil, fmt.Errorf("encrypted data too short for nonce")
+	}
+
+	nonce := remaining[:gcm.NonceSize()]
+	ciphertext := remaining[gcm.NonceSize():]
+
+	// 6. Decrypt
+	plaintextBytes, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
+	// 7. Unmarshal note data
+	var noteData map[string]interface{}
+	if err := json.Unmarshal(plaintextBytes, &noteData); err != nil {
+		return nil, fmt.Errorf("JSON unmarshaling failed: %w", err)
+	}
+
+	// 8. Reconstruct note
+	coins := new(big.Int)
+	coins.SetString(noteData["coins"].(string), 10)
+	energy := new(big.Int)
+	energy.SetString(noteData["energy"].(string), 10)
+
+	note := &Note{
+		Value: Gamma{
+			Coins:  coins,
+			Energy: energy,
+		},
+		PkOwner: noteData["pk"].([]byte),
+		Rho:     noteData["rho"].([]byte),
+		Rand:    noteData["rand"].([]byte),
+		Cm:      noteData["cm"].([]byte),
+	}
+
+	return note, nil
 }
