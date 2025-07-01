@@ -1,80 +1,13 @@
 {
   "Name": "Participant_07",
-  "Sk": "424868869065261989007479480864121995927874510292494676747156477537903626502",
+  "Sk": "7818072676900983514776465837866771257013476203001816928757480927585091044770",
   "Pk": {
-    "X": "121831547500412470338648552382159470997924753719921690751316877822923962660264826873565001737255051005919194143285",
-    "Y": "35474907700945889851984130665092908915154635622338124061754694374974771825357211622630610890424361003924782764620"
+    "X": "71497841053393144309634274624937449223945029970767371760156952344500807962261949116899480349179560292500410329841",
+    "Y": "99156410979857863065843264475531830856981519890315708366312751703894529075706412503701926685689768646147720773792"
   },
-  "Notes": [
-    {
-      "Value": {
-        "Coins": 9756,
-        "Energy": 495
-      },
-      "PkOwner": "AZnIYiCMN3L+eJSjXN957uevM4KgCDMPWBrLC4SDdBSzHxMrXEEshTHVW+TFFozI",
-      "Rho": "DpOwrvwmq7QCcYIvHosbFygknD7itobQOkrZyBw51fY=",
-      "Rand": "wOQ4cchN/P/dWrnI1SopgHgylmKsPUMP6scFPmgonxw=",
-      "Cm": "AOxMYYyvDfmWK3vi/cBu0NeoHgkGxTvea0oD4UumOEvdTJi16Zq5iHgB4m6hLVWA"
-    },
-    {
-      "Value": {
-        "Coins": 49820,
-        "Energy": 2920
-      },
-      "PkOwner": null,
-      "Rho": null,
-      "Rand": null,
-      "Cm": null
-    }
-  ],
-  "NoteKeys": [
-    "CKWIsoPk+lm10gDm4TEeMHxgiMa8eBrztz5YyaK/BQ0=",
-    "APB3njlGBwl+NQXlyRaUjooD/JZlonRm8qlbe/teyQY="
-  ],
-  "Spent": [
-    false,
-    false
-  ],
-  "CAux": [
-    [
-      [
-        0,
-        0,
-        0,
-        0,
-        0
-      ]
-    ],
-    [
-      [
-        0,
-        0,
-        0,
-        0,
-        0
-      ]
-    ]
-  ],
-  "WithdrawOutNote": [
-    {
-      "Value": {
-        "Coins": 9756,
-        "Energy": 495
-      },
-      "PkOwner": "AZnIYiCMN3L+eJSjXN957uevM4KgCDMPWBrLC4SDdBSzHxMrXEEshTHVW+TFFozI",
-      "Rho": "DpOwrvwmq7QCcYIvHosbFygknD7itobQOkrZyBw51fY=",
-      "Rand": "wOQ4cchN/P/dWrnI1SopgHgylmKsPUMP6scFPmgonxw=",
-      "Cm": "AOxMYYyvDfmWK3vi/cBu0NeoHgkGxTvea0oD4UumOEvdTJi16Zq5iHgB4m6hLVWA"
-    },
-    {
-      "Value": {
-        "Coins": 49820,
-        "Energy": 2920
-      },
-      "PkOwner": null,
-      "Rho": null,
-      "Rand": null,
-      "Cm": null
-    }
-  ]
+  "Notes": [],
+  "NoteKeys": [],
+  "Spent": [],
+  "CAux": [],
+  "WithdrawOutNote": []
 }

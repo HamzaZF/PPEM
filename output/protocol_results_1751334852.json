@@ -1,0 +1,124 @@
+{
+  "timestamp": "2025-07-01T09:54:12.5778311+08:00",
+  "participants": [
+    {
+      "name": "Participant_01",
+      "initial_coins": "5565",
+      "initial_energy": "300",
+      "bid": "72",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "a0ea9a71c1b06602e982f71527f86436d66dff3bca00784ef10ec841fefb2355",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_02",
+      "initial_coins": "7357",
+      "initial_energy": "494",
+      "bid": "91",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "a0580a552a8e782f3ae5150f5706e6596cfe24b5b23e63b5b4650047d90c2cca",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_03",
+      "initial_coins": "6461",
+      "initial_energy": "106",
+      "bid": "58",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "808935964c72e820a38da0112f776372f81b26f3b826cdd77d9dc85b242d0b0c",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_04",
+      "initial_coins": "1919",
+      "initial_energy": "351",
+      "bid": "27",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "80780ca90a0b1d12bab4d9c4d7300db921c902ac2d685165f6ed86494d83218c",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_05",
+      "initial_coins": "5960",
+      "initial_energy": "207",
+      "bid": "53",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "8071068b87921713c46f977ea8d62d929dfef07e10d23042b7a0f7e1c93c575e",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_06",
+      "initial_coins": "1087",
+      "initial_energy": "297",
+      "bid": "21",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "a1198eb3667bd2f8baa7852f9d3743436d5f8252357d4f5644a6f0406c95ac1e",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_07",
+      "initial_coins": "1866",
+      "initial_energy": "418",
+      "bid": "79",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "800634ab46dbd93400c8b6f0fc841f7ed706e99d997fb072166c8808273fddb5",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_08",
+      "initial_coins": "9419",
+      "initial_energy": "381",
+      "bid": "55",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "a00b77c176858df6ba6387d74da58f64b39282f355f63cd1fa66306334f0fa9c",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_09",
+      "initial_coins": "2017",
+      "initial_energy": "205",
+      "bid": "91",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "a075a3467c62896c7faa31ba639115eae9d762ad208d0d576676e7c07593c7af",
+      "final_status": "CLAIMED"
+    },
+    {
+      "name": "Participant_10",
+      "initial_coins": "7982",
+      "initial_energy": "255",
+      "bid": "84",
+      "final_coins": "CONFIDENTIAL",
+      "final_energy": "CONFIDENTIAL",
+      "registration_tx": "804af1bc509af22e316fdfc85c67065467354c771f080ca178262dfa2673d7fb",
+      "final_status": "CLAIMED"
+    }
+  ],
+  "auction_results": {
+    "total_participants": 10,
+    "winners": null,
+    "total_volume": "Confidential",
+    "auction_type": "Double Auction (SBExM)",
+    "proof_generated": true
+  },
+  "ledger_summary": {
+    "total_transactions": 11,
+    "commitment_count": 11,
+    "serial_number_count": 11
+  },
+  "performance_metrics": {
+    "setup_time_ns": 284707076100,
+    "registration_time_ns": 18276588800,
+    "auction_time_ns": 12022246400,
+    "receiving_time_ns": 11026500,
+    "total_time_ns": 315147929800
+  }
+}

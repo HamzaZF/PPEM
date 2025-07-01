@@ -80,20 +80,53 @@ func runReceivingPhase(participants []*zerocash.Participant, ledger *zerocash.Le
 func main() {
 	log.Println("=== Zerocash Auction Protocol: N=10 Scenario ===")
 
-	// 1. Setup: Compile CircuitTxF10 and generate/load ZKP keys
-	var circuit exchange.CircuitTxF10
-	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
+	// 1. Setup: Compile all required circuits and generate/load ZKP keys
+
+	// CircuitTx for Algorithm 1 (Transaction)
+	var circuitTx zerocash.CircuitTx
+	ccsTx, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx)
 	if err != nil {
-		log.Printf("ERROR: circuit compilation failed: %v", err)
+		log.Printf("ERROR: CircuitTx compilation failed: %v", err)
 		return
 	}
-	pkPath := "proving_f10.key"
-	vkPath := "verifying_f10.key"
-	pk, vk, err := zerocash.SetupOrLoadKeys(ccs, pkPath, vkPath)
+	pkTxPath := "keys/CircuitTx_pk.bin"
+	vkTxPath := "keys/CircuitTx_vk.bin"
+	pkTx, vkTx, err := zerocash.SetupOrLoadKeys(ccsTx, pkTxPath, vkTxPath)
 	if err != nil {
-		log.Printf("ERROR: SetupOrLoadKeys failed: %v", err)
+		log.Printf("ERROR: CircuitTx key setup failed: %v", err)
 		return
 	}
+
+	// CircuitTxRegister for Algorithm 2 (Registration)
+	var circuitReg register.CircuitTxRegister
+	ccsReg, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitReg)
+	if err != nil {
+		log.Printf("ERROR: CircuitTxRegister compilation failed: %v", err)
+		return
+	}
+	pkRegPath := "keys/CircuitTxRegister_pk.bin"
+	vkRegPath := "keys/CircuitTxRegister_vk.bin"
+	pkReg, _, err := zerocash.SetupOrLoadKeys(ccsReg, pkRegPath, vkRegPath)
+	if err != nil {
+		log.Printf("ERROR: CircuitTxRegister key setup failed: %v", err)
+		return
+	}
+
+	// CircuitTxF10 for Algorithm 3 (Exchange)
+	var circuitF10 exchange.CircuitTxF10
+	ccsF10, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF10)
+	if err != nil {
+		log.Printf("ERROR: CircuitTxF10 compilation failed: %v", err)
+		return
+	}
+	pkF10Path := "keys/proving_f10.key"
+	vkF10Path := "keys/verifying_f10.key"
+	pkF10, vkF10, err := zerocash.SetupOrLoadKeys(ccsF10, pkF10Path, vkF10Path)
+	if err != nil {
+		log.Printf("ERROR: CircuitTxF10 key setup failed: %v", err)
+		return
+	}
+
 	params := &zerocash.Params{}
 
 	// Load or create the ledger
@@ -106,11 +139,11 @@ func main() {
 	}
 
 	// 2. Create auctioneer and 10 participants
-	auctioneer := zerocash.NewParticipant("Auctioneer", pk, vk, params, zerocash.RoleAuctioneer, nil)
+	auctioneer := zerocash.NewParticipant("Auctioneer", pkF10, vkF10, params, zerocash.RoleAuctioneer, nil)
 	participants := make([]*zerocash.Participant, N)
 	for i := 0; i < N; i++ {
 		name := fmt.Sprintf("Participant%d", i+1)
-		participants[i] = zerocash.NewParticipant(name, pk, vk, params, zerocash.RoleParticipant, auctioneer.Pk)
+		participants[i] = zerocash.NewParticipant(name, pkTx, vkTx, params, zerocash.RoleParticipant, auctioneer.Pk)
 	}
 
 	// 3. Each participant creates a note and registration payload
@@ -123,7 +156,7 @@ func main() {
 		note := zerocash.NewNote(coins, energy, skBytes[:])
 		bid := big.NewInt(10 + int64(i)) // Example: unique bid per participant
 		bids[i] = bid
-		regResult, err := register.Register(p, note, bid, pk, skBytes[:])
+		regResult, err := register.Register(p, note, bid, pkTx, ccsTx, pkReg, ccsReg, skBytes[:])
 		if err != nil {
 			log.Printf("ERROR: registration failed for %s: %v", p.Name, err)
 			return
@@ -150,7 +183,7 @@ func main() {
 	log.Println("All participants registered. Starting auction phase...")
 
 	// 4. Auction phase: run ExchangePhase
-	txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), params, pk, ccs)
+	txOut, info, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), ledger, params, pkF10, ccsF10)
 	if err != nil {
 		log.Printf("ERROR: Auction phase failed: %v", err)
 		return
@@ -163,7 +196,7 @@ func main() {
 	fmt.Printf("Public Info: %+v\n", info)
 
 	// 6. Receiving phase (new)
-	runReceivingPhase(participants, ledger, pk, ccs, vk)
+	runReceivingPhase(participants, ledger, pkF10, ccsF10, vkF10)
 
 	// (Optional) Save proof and txOut to files or ledger as needed
 	// Withdraw phase not implemented yet

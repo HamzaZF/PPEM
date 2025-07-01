@@ -46,20 +46,16 @@ type Tx struct {
 	G_r       sw_bls12377.G1Affine
 }
 
-// CreateTx creates a new confidential transaction from an old note and a new owner.
-// Steps:
-//  1. Compute serial number for old note (prevents double-spending)
-//  2. Generate new note for the recipient (with new randomness)
-//  3. Encrypt new note fields for the recipient
-//  4. Build ZKP witness and generate Groth16 proof
-//  5. Return the transaction object
-func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params *Params, ccs constraint.ConstraintSystem, pk groth16.ProvingKey) (*Tx, error) {
+// CreateTx creates a new confidential transaction following Algorithm 1 from the paper.
+// Algorithm 1: Transaction([n_i^old]^n_{i=1}, [sk_i^old]^n_{i=1}, [Γ_j^new]^m_{j=1}, [pk_j]^m_{j=1}) → (tx)
+// Note: pk is passed as parameter, not computed inside (as per Algorithm 1)
+func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params *Params, ccs constraint.ConstraintSystem, pk groth16.ProvingKey) (*Tx, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("[PANIC RECOVERED] in CreateTx. Witness struct:")
 			fmt.Printf("oldNote: %+v\n", oldNote)
 			fmt.Printf("oldSk: %x\n", oldSk)
-			fmt.Printf("newSk: %x\n", newSk)
+			fmt.Printf("pkNew: %x\n", pkNew)
 			fmt.Printf("value: %v, energy: %v\n", value, energy)
 		}
 	}()
@@ -75,11 +71,8 @@ func CreateTx(oldNote *Note, oldSk, newSk []byte, value, energy *big.Int, params
 	// Step 3: Generate randomness for new note
 	randNew := randomBytes(32)
 
-	// Step 4: Compute pk for new note
-	pkNew := mimcHash(newSk)
-
-	// Step 5: Compute commitment for new note
-	cmNew := Commitment(value, energy, new(big.Int).SetBytes(rhoNew), new(big.Int).SetBytes(randNew))
+	// Step 5: Compute commitment for new note following paper: cm = Com(Γ || pk || ρ, r)
+	cmNew := Commitment(value, energy, pkNew, new(big.Int).SetBytes(rhoNew), new(big.Int).SetBytes(randNew))
 
 	// Step 6: Build new note
 	newNote := &Note{

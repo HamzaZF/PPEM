@@ -37,18 +37,20 @@ func (c *CircuitTx) Define(api frontend.API) error {
 	snComputed := PRF(api, c.SkOld, c.RhoOld)
 	api.AssertIsEqual(c.SnOld, snComputed)
 
-	// Step 2: rhoNew = H(snOld)
+	// Step 2: rhoNew = H(j||snOld) as per paper formula (j=0 for single note)
 	hasher, _ := mimc.NewMiMC(api)
-	hasher.Write(snComputed)
+	hasher.Write(0)          // Add index j=0 for single note output
+	hasher.Write(snComputed) // Add serial number
 	rhoNewComputed := hasher.Sum()
 	api.AssertIsEqual(c.RhoNew, rhoNewComputed)
 
-	// Step 4: Commitment (cmNew = Com(coins, energy, rhoNew, randNew))
+	// Step 4: Commitment (cmNew = Com(Γ || pk || ρ, r)) as per paper formula
 	hasher.Reset()
-	hasher.Write(c.NewCoin)
-	hasher.Write(c.NewEnergy)
-	hasher.Write(c.RhoNew)
-	hasher.Write(c.RandNew)
+	hasher.Write(c.NewCoin)   // Γ.coins
+	hasher.Write(c.NewEnergy) // Γ.energy
+	hasher.Write(c.PkNew)     // pk (public key)
+	hasher.Write(c.RhoNew)    // ρ (rho)
+	hasher.Write(c.RandNew)   // r (randomness)
 	cmNewComputed := hasher.Sum()
 	api.AssertIsEqual(c.CmNew, cmNewComputed)
 
@@ -153,24 +155,34 @@ type CircuitTx10 struct {
 }
 
 func (c *CircuitTx10) Define(api frontend.API) error {
-	// Apply all CircuitTx constraints element-wise for each of the 10 notes
+	// First, compute all serial numbers
+	var allSerialNumbers [10]frontend.Variable
 	for i := 0; i < 10; i++ {
 		// Step 1: Serial number (snOld = PRF(skOld, rhoOld)) for note i
 		snComputed := PRF(api, c.SkOld[i], c.RhoOld[i])
 		api.AssertIsEqual(c.SnOld[i], snComputed)
+		allSerialNumbers[i] = snComputed
+	}
 
-		// Step 2: rhoNew = H(snOld) for note i
+	// Apply all CircuitTx constraints element-wise for each of the 10 notes
+	for i := 0; i < 10; i++ {
+		// Step 2: rhoNew = H(j||sn₁ᵒˡᵈ||...||sn₁₀ᵒˡᵈ) as per paper formula
 		hasher, _ := mimc.NewMiMC(api)
-		hasher.Write(snComputed)
+		hasher.Write(i) // Add index j
+		// Add all old serial numbers sn₁ᵒˡᵈ||...||sn₁₀ᵒˡᵈ
+		for j := 0; j < 10; j++ {
+			hasher.Write(allSerialNumbers[j])
+		}
 		rhoNewComputed := hasher.Sum()
 		api.AssertIsEqual(c.RhoNew[i], rhoNewComputed)
 
-		// Step 4: Commitment (cmNew = Com(coins, energy, rhoNew, randNew)) for note i
+		// Step 4: Commitment (cmNew = Com(Γ || pk || ρ, r)) as per paper formula for note i
 		hasher.Reset()
-		hasher.Write(c.NewCoin[i])
-		hasher.Write(c.NewEnergy[i])
-		hasher.Write(c.RhoNew[i])
-		hasher.Write(c.RandNew[i])
+		hasher.Write(c.NewCoin[i])   // Γ.coins
+		hasher.Write(c.NewEnergy[i]) // Γ.energy
+		hasher.Write(c.PkNew[i])     // pk (public key)
+		hasher.Write(c.RhoNew[i])    // ρ (rho)
+		hasher.Write(c.RandNew[i])   // r (randomness)
 		cmNewComputed := hasher.Sum()
 		api.AssertIsEqual(c.CmNew[i], cmNewComputed)
 

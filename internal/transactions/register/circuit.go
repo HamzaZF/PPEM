@@ -20,6 +20,7 @@ type CircuitTxRegister struct {
 	G             sw_bls12377.G1Affine `gnark:",public"`
 	G_b           sw_bls12377.G1Affine `gnark:",public"`
 	G_r           sw_bls12377.G1Affine `gnark:",public"`
+
 	// ====== PRIVATE VARIABLES ======
 	InCoin   frontend.Variable
 	InEnergy frontend.Variable
@@ -34,13 +35,14 @@ type CircuitTxRegister struct {
 
 // Define implements the circuit constraints for registration.
 func (c *CircuitTxRegister) Define(api frontend.API) error {
-	// 1) Recompute cmIn
+	// 1) Recompute cmIn following paper: cm = Com(Γ || pk || ρ, r)
 	hasher, _ := mimc.NewMiMC(api)
 	hasher.Reset()
-	hasher.Write(c.InCoin)
-	hasher.Write(c.InEnergy)
-	hasher.Write(c.RhoIn)
-	hasher.Write(c.RandIn)
+	hasher.Write(c.InCoin)   // Γ.coins
+	hasher.Write(c.InEnergy) // Γ.energy
+	hasher.Write(c.PkIn)     // pk (public key)
+	hasher.Write(c.RhoIn)    // ρ (rho)
+	hasher.Write(c.RandIn)   // r (randomness)
 	cm := hasher.Sum()
 	api.AssertIsEqual(c.CmIn, cm)
 

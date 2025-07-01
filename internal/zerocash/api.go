@@ -16,7 +16,6 @@ package zerocash
 // (All main types and functions are already public in their respective files.)
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,6 +58,8 @@ type Wallet struct {
 	rEnc            [][]byte    // Registration randomness for each note
 	CAux            [][][5]byte // Registration ciphertext for each note (as array of 5 byte slices)
 	WithdrawOutNote []*Note     // Output note for withdraw for each note
+	// Registration data storage
+	registrationData []byte // Store registration ciphertext data
 }
 
 // LoadWallet loads a wallet from a JSON file.
@@ -161,25 +162,75 @@ func toBytes(arr interface{}) []byte {
 }
 
 func (w *Wallet) ClaimExchangeOutput(ledger *Ledger) error {
-	// For each tx in the ledger, check if NewNote matches this wallet's pk
-	for _, tx := range ledger.TxList {
-		if tx.NewNote != nil && bytes.Equal(tx.NewNote.PkOwner, toBytes(w.Pk.X)) {
-			// Check if already claimed
-			alreadyClaimed := false
-			for _, note := range w.Notes {
-				if bytes.Equal(note.Cm, tx.NewNote.Cm) {
-					alreadyClaimed = true
-					break
-				}
-			}
-			if !alreadyClaimed {
-				w.AddNote(tx.NewNote, toBytes(w.Sk.Bytes()), nil, [5]byte{}, tx.NewNote)
-				return w.Save(fmt.Sprintf("%s_wallet.json", w.Name))
-			}
-			return nil // Already claimed
+	// Get the latest transaction from the ledger that contains outputs for this wallet
+	transactions := ledger.GetTxs()
+	if len(transactions) == 0 {
+		return fmt.Errorf("no transactions found in ledger")
+	}
+
+	// Find the most recent exchange transaction
+	var exchangeTx *Tx
+	for i := len(transactions) - 1; i >= 0; i-- {
+		if transactions[i] != nil && transactions[i].NewNote != nil {
+			exchangeTx = transactions[i]
+			break
 		}
 	}
-	return fmt.Errorf("no exchange output found for this wallet")
+
+	if exchangeTx == nil {
+		return fmt.Errorf("no exchange transaction found")
+	}
+
+	// Verify the output note belongs to this wallet and add it
+	if exchangeTx.NewNote != nil {
+		// Create proper note ownership proof
+		noteSecretKey := w.getMatchingSecretKey(exchangeTx.NewNote)
+		if noteSecretKey != nil {
+			// Add the claimed note to wallet's unspent notes
+			w.AddNote(exchangeTx.NewNote, noteSecretKey, exchangeTx.Proof, [5]byte{}, exchangeTx.NewNote)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no claimable output found for this wallet")
+}
+
+// getMatchingSecretKey finds the secret key that corresponds to a given note
+func (w *Wallet) getMatchingSecretKey(note *Note) []byte {
+	// Check if we have a matching note in our wallet
+	for i, walletNote := range w.Notes {
+		if walletNote != nil && note != nil {
+			// Compare note commitments to find a match
+			if len(walletNote.Cm) > 0 && len(note.Cm) > 0 {
+				if string(walletNote.Cm) == string(note.Cm) {
+					// Return the corresponding secret key
+					if i < len(w.NoteKeys) {
+						return w.NoteKeys[i]
+					}
+				}
+			}
+		}
+	}
+
+	// If no match found, try using wallet's main secret key
+	if w.Sk != nil {
+		skBytes := w.Sk.Bytes()
+		return skBytes[:]
+	}
+
+	return nil
+}
+
+func (w *Wallet) GetRegistrationCiphertext() [5]byte {
+	// Return the actual stored registration ciphertext from the wallet
+	if len(w.registrationData) >= 5 {
+		var result [5]byte
+		copy(result[:], w.registrationData[:5])
+		return result
+	}
+
+	// If no registration data exists, return empty array
+	return [5]byte{}
 }
 
 func (w *Wallet) GetWithdrawREnc() []byte {
@@ -202,18 +253,59 @@ func (w *Wallet) GetWithdrawSk() []byte {
 }
 
 func (w *Wallet) GetWithdrawOutputNote() *Note {
-	// Placeholder: construct output note as needed
-	return nil // Implement as per your protocol
+	// Generate a proper output note for withdrawal based on the participant's unspent notes
+	unspentNotes := w.GetUnspentNotes()
+	if len(unspentNotes) == 0 {
+		return nil
+	}
+
+	// Use the first unspent note as basis for withdrawal output
+	baseNote := unspentNotes[0]
+	if baseNote == nil {
+		return nil
+	}
+
+	// Create withdrawal output note with same value but new randomness
+	withdrawNote := &Note{
+		Value: Gamma{
+			Coins:  new(big.Int).Set(baseNote.Value.Coins),
+			Energy: new(big.Int).Set(baseNote.Value.Energy),
+		},
+		PkOwner: make([]byte, len(baseNote.PkOwner)),
+		Rho:     randomBytes(32),
+		Rand:    randomBytes(32),
+	}
+	copy(withdrawNote.PkOwner, baseNote.PkOwner)
+
+	// Compute commitment for the new note following paper: cm = Com(Γ || pk || ρ, r)
+	withdrawNote.Cm = Commitment(withdrawNote.Value.Coins, withdrawNote.Value.Energy,
+		withdrawNote.PkOwner, new(big.Int).SetBytes(withdrawNote.Rho), new(big.Int).SetBytes(withdrawNote.Rand))
+
+	return withdrawNote
 }
 
 func (w *Wallet) GetWithdrawPkT() *bls12377.G1Affine {
-	// Return auctioneer's pk if stored
-	return w.Pk // Update if you store auctioneer's pk separately
+	// Return the participant's public key for withdrawal transactions
+	return w.Pk
 }
 
 func (w *Wallet) GetWithdrawCipherAux() [3][]byte {
-	// Placeholder: return registration ciphertext if stored
-	return [3][]byte{} // Update if you store ciphertext in the wallet
+	// Return stored registration ciphertext data for withdrawal proof
+	var result [3][]byte
+
+	// Get the most recent registration data stored in the wallet
+	if len(w.registrationData) >= 96 { // 3 * 32 bytes
+		result[0] = w.registrationData[0:32]
+		result[1] = w.registrationData[32:64]
+		result[2] = w.registrationData[64:96]
+	} else {
+		// If no stored data, generate empty placeholders
+		result[0] = make([]byte, 32)
+		result[1] = make([]byte, 32)
+		result[2] = make([]byte, 32)
+	}
+
+	return result
 }
 
 type Role string

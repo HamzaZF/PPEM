@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"math/big"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/ecc/bw6-761/fr/mimc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
@@ -94,4 +95,35 @@ func Withdraw(
 		CipherAux: cipherAux,
 	}
 	return tx, proofBuf.Bytes(), nil
+}
+
+// VerifyWithdraw verifies a withdrawal transaction and its proof
+func VerifyWithdraw(tx *WithdrawTx, proofBytes []byte, vk groth16.VerifyingKey) error {
+	// Create public witness
+	publicWitness := &CircuitWithdraw{
+		SnIn:  tx.SnIn.String(),
+		CmOut: tx.CmOut.String(),
+		PkT:   tx.PkT,
+		CipherAux: [3]frontend.Variable{
+			tx.CipherAux[0].String(),
+			tx.CipherAux[1].String(),
+			tx.CipherAux[2].String(),
+		},
+	}
+
+	// Create gnark public witness
+	w, err := frontend.NewWitness(publicWitness, ecc.BW6_761.ScalarField(), frontend.PublicOnly())
+	if err != nil {
+		return err
+	}
+
+	// Unmarshal proof
+	proof := groth16.NewProof(ecc.BW6_761)
+	_, err = proof.ReadFrom(bytes.NewReader(proofBytes))
+	if err != nil {
+		return err
+	}
+
+	// Verify the proof
+	return groth16.Verify(proof, vk, w)
 }

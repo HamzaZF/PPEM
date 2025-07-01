@@ -18,12 +18,13 @@ type Note struct {
 }
 
 // NewNote creates a new note with the given coins, energy, and secret key.
-// The note is randomized and committed using MiMC.
+// The note is randomized and committed using MiMC following paper spec: cm = Com(Γ || pk || ρ, r).
 func NewNote(coins, energy *big.Int, sk []byte) *Note {
 	rho := randomBytes(32)
 	rand := randomBytes(32)
 	pk := mimcHash(sk)
-	cm := Commitment(coins, energy, new(big.Int).SetBytes(rho), new(big.Int).SetBytes(rand))
+	// Commitment follows paper: cm = Com(Γ || pk || ρ, r)
+	cm := Commitment(coins, energy, pk, new(big.Int).SetBytes(rho), new(big.Int).SetBytes(rand))
 	return &Note{
 		Value: Gamma{
 			Coins:  coins,

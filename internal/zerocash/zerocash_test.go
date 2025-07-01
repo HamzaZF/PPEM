@@ -36,7 +36,9 @@ func TestZerocashEndToEnd(t *testing.T) {
 	oldNote := NewNote(coins, energy, oldSk)
 
 	// Step 2: Create a transaction
-	tx, err := CreateTx(oldNote, oldSk, newSk, coins, energy, params, ccs, pk)
+	// Compute pk from sk as per Algorithm 1
+	pkNew := mimcHash(newSk)
+	tx, err := CreateTx(oldNote, oldSk, pkNew, coins, energy, params, ccs, pk)
 	if err != nil {
 		t.Fatalf("CreateTx failed: %v", err)
 	}

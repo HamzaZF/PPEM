@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -105,63 +106,150 @@ func main() {
 	}
 
 	// ═══════════════════════════════════════════════════════════════
-	// PHASE 1: SETUP - Circuit Compilation and Key Generation
+	// SETUP PHASE - Initialize cryptographic circuits and keys
 	// ═══════════════════════════════════════════════════════════════
+	headerColor.Println("🚀 PHASE 1: SETUP PHASE")
+	infoColor.Println("  🔧 Compiling circuits and generating proving/verification keys...")
 	setupStart := time.Now()
-	infoColor.Println("\n🔧 PHASE 1: SETUP - Circuit Compilation and Key Generation")
 
-	// 1. CircuitTx (N=1) - Used for registration and withdrawal
-	infoColor.Println("  📋 Compiling CircuitTx (N=1) for registration/withdrawal...")
-	var circuitTx zerocash.CircuitTx
-	ccsTx, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx)
-	if err != nil {
-		errorColor.Printf("❌ CircuitTx compilation failed: %v\n", err)
-		os.Exit(1)
-	}
+	// Setup Algorithm 1 keys: CircuitTx for individual transactions
+	pkTxPath := "keys/CircuitTx_pk.bin"
+	vkTxPath := "keys/CircuitTx_vk.bin"
+	var pkTx groth16.ProvingKey
+	var vkTx groth16.VerifyingKey
+	var ccsTx constraint.ConstraintSystem
 
-	pkTxPath := "keys/proving_tx.key"
-	vkTxPath := "keys/verifying_tx.key"
-	os.MkdirAll("keys", 0755)
-	pkTx, vkTx, err := zerocash.SetupOrLoadKeys(ccsTx, pkTxPath, vkTxPath)
-	if err != nil {
-		errorColor.Printf("❌ CircuitTx key setup failed: %v\n", err)
-		os.Exit(1)
+	// Try to load existing keys first
+	if loadedPk, loadedVk, err := tryLoadKeys(pkTxPath, vkTxPath); err == nil {
+		infoColor.Println("  📋 Loading existing CircuitTx keys...")
+		pkTx, vkTx = loadedPk, loadedVk
+		// Still need to compile for constraint system
+		var circuitTx zerocash.CircuitTx
+		ccsTx, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		infoColor.Println("  📋 Compiling CircuitTx for individual transactions...")
+		var circuitTx zerocash.CircuitTx
+		ccsTx, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		pkTx, vkTx, err = zerocash.SetupOrLoadKeys(ccsTx, pkTxPath, vkTxPath)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx key setup failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	successColor.Println("  ✅ CircuitTx setup complete")
 
-	// 2. CircuitTx10 (N=10) - Used for batch auction transactions
-	infoColor.Println("  📋 Compiling CircuitTx10 (N=10) for batch auction...")
-	var circuitTx10 zerocash.CircuitTx10
-	ccsTx10, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx10)
-	if err != nil {
-		errorColor.Printf("❌ CircuitTx10 compilation failed: %v\n", err)
-		os.Exit(1)
-	}
+	// Setup CircuitTx10 keys for batch operations and withdrawals
+	pkTx10Path := "keys/CircuitTx10_pk.bin"
+	vkTx10Path := "keys/CircuitTx10_vk.bin"
+	var pkTx10 groth16.ProvingKey
+	var vkTx10 groth16.VerifyingKey
+	var ccsTx10 constraint.ConstraintSystem
 
-	pkTx10Path := "keys/proving_tx10.key"
-	vkTx10Path := "keys/verifying_tx10.key"
-	_, _, err = zerocash.SetupOrLoadKeys(ccsTx10, pkTx10Path, vkTx10Path)
-	if err != nil {
-		errorColor.Printf("❌ CircuitTx10 key setup failed: %v\n", err)
-		os.Exit(1)
+	// Try to load existing keys first
+	if loadedPk, loadedVk, err := tryLoadKeys(pkTx10Path, vkTx10Path); err == nil {
+		infoColor.Println("  📋 Loading existing CircuitTx10 keys...")
+		pkTx10, vkTx10 = loadedPk, loadedVk
+		// Still need to compile for constraint system
+		var circuitTx10 zerocash.CircuitTx10
+		ccsTx10, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx10)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx10 compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		infoColor.Println("  📋 Compiling CircuitTx10 for batch operations...")
+		var circuitTx10 zerocash.CircuitTx10
+		ccsTx10, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitTx10)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx10 compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		pkTx10, vkTx10, err = zerocash.SetupOrLoadKeys(ccsTx10, pkTx10Path, vkTx10Path)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTx10 key setup failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	successColor.Println("  ✅ CircuitTx10 setup complete")
 
-	// 3. CircuitF10 - Used for auction phase verification
-	infoColor.Println("  📋 Compiling CircuitF10 for auction verification...")
-	var circuitF10 exchange.CircuitTxF10
-	ccsF10, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF10)
-	if err != nil {
-		errorColor.Printf("❌ CircuitF10 compilation failed: %v\n", err)
-		os.Exit(1)
-	}
+	// Setup Algorithm 2 keys: CircuitTxRegister for registration proofs
+	pkRegPath := "keys/CircuitTxRegister_pk.bin"
+	vkRegPath := "keys/CircuitTxRegister_vk.bin"
+	var pkReg groth16.ProvingKey
+	var vkReg groth16.VerifyingKey
+	var ccsReg constraint.ConstraintSystem
 
+	// Try to load existing keys first
+	if loadedPk, loadedVk, err := tryLoadKeys(pkRegPath, vkRegPath); err == nil {
+		infoColor.Println("  📋 Loading existing CircuitTxRegister keys...")
+		pkReg, vkReg = loadedPk, loadedVk
+		// Still need to compile for constraint system
+		var circuitReg register.CircuitTxRegister
+		ccsReg, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitReg)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTxRegister compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		infoColor.Println("  📋 Compiling CircuitTxRegister for registration verification...")
+		var circuitReg register.CircuitTxRegister
+		ccsReg, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitReg)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTxRegister compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		pkReg, vkReg, err = zerocash.SetupOrLoadKeys(ccsReg, pkRegPath, vkRegPath)
+		if err != nil {
+			errorColor.Printf("❌ CircuitTxRegister key setup failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	successColor.Println("  ✅ CircuitTxRegister setup complete")
+
+	// 4. CircuitF10 - Used for auction phase verification
 	pkF10Path := "keys/proving_f10.key"
 	vkF10Path := "keys/verifying_f10.key"
-	pkF10, vkF10, err := zerocash.SetupOrLoadKeys(ccsF10, pkF10Path, vkF10Path)
-	if err != nil {
-		errorColor.Printf("❌ CircuitF10 key setup failed: %v\n", err)
-		os.Exit(1)
+
+	var pkF10 groth16.ProvingKey
+	var vkF10 groth16.VerifyingKey
+	var ccsF10 constraint.ConstraintSystem
+
+	// Try to load existing keys first
+	if loadedPk, loadedVk, err := tryLoadKeys(pkF10Path, vkF10Path); err == nil {
+		infoColor.Println("  📋 Loading existing CircuitF10 keys...")
+		pkF10, vkF10 = loadedPk, loadedVk
+		// Still need to compile for constraint system
+		var circuitF10 exchange.CircuitTxF10
+		ccsF10, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF10)
+		if err != nil {
+			errorColor.Printf("❌ CircuitF10 compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		infoColor.Println("  📋 Compiling CircuitF10 for auction verification...")
+		var circuitF10 exchange.CircuitTxF10
+		ccsF10, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF10)
+		if err != nil {
+			errorColor.Printf("❌ CircuitF10 compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		pkF10, vkF10, err = zerocash.SetupOrLoadKeys(ccsF10, pkF10Path, vkF10Path)
+		if err != nil {
+			errorColor.Printf("❌ CircuitF10 key setup failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	successColor.Println("  ✅ CircuitF10 setup complete")
 
@@ -173,17 +261,14 @@ func main() {
 	// INFRASTRUCTURE SETUP
 	// ═══════════════════════════════════════════════════════════════
 
-	// Initialize ledger
+	// Initialize ledger - always create fresh ledger for each run to avoid double-spend issues
 	ledgerPath := "output/ledger.json"
 	os.MkdirAll("output", 0755)
-	var ledger *zerocash.Ledger
-	if l, err := zerocash.LoadLedgerFromFile(ledgerPath); err == nil {
-		ledger = l
-		infoColor.Println("📖 Loaded existing ledger")
-	} else {
-		ledger = zerocash.NewLedger()
-		infoColor.Println("📖 Created new ledger")
-	}
+	// Clean up old wallet files to ensure fresh start
+	os.RemoveAll("output/wallets")
+	os.MkdirAll("output/wallets", 0755)
+	ledger := zerocash.NewLedger()
+	infoColor.Println("📖 Created new ledger")
 
 	// Create auctioneer
 	auctioneer := zerocash.NewParticipant("Auctioneer", pkF10, vkF10, params, zerocash.RoleAuctioneer, nil)
@@ -223,31 +308,40 @@ func main() {
 		coins := participantData[i].coins
 		energy := participantData[i].energy
 		bid := participantData[i].bid
-		skBytes := p.Sk.Bytes()
-		note := zerocash.NewNote(coins, energy, skBytes[:])
 
-		// Execute Algorithm 2 (Register)
-		regResult, err := register.Register(p, note, bid, pkTx, skBytes[:], ccsTx)
+		// CRITICAL FIX: Generate separate note secret key (NOT DH key)
+		// Note keys are for ownership/spending, DH keys are for encryption
+		noteSecretKey := zerocash.RandomBytes(32) // Fresh random bytes for note ownership
+		note := zerocash.NewNote(coins, energy, noteSecretKey)
+
+		// Execute Algorithm 2 (Register) - pass correct keys for both proofs
+		// Algorithm 2 calls Algorithm 1 internally, so we need both sets of keys
+		regResult, err := register.Register(p, note, bid, pkTx, ccsTx, pkReg, ccsReg, noteSecretKey)
 		if err != nil {
 			errorColor.Printf("❌ Registration failed for %s: %v\n", p.Name, err)
 			os.Exit(1)
 		}
 
+		// Verify the registration proof for production security
+		if err := verifyRegistrationProof(regResult.Proof, regResult.CAux, note, bid, vkReg, ccsReg); err != nil {
+			errorColor.Printf("❌ Registration proof verification failed for %s: %v\n", p.Name, err)
+			os.Exit(1)
+		}
+
 		result.Participants[i].RegistrationTx = fmt.Sprintf("%x", regResult.Proof[:min(32, len(regResult.Proof))])
 
-		// Save to wallet
-		p.Wallet.AddNote(note, skBytes[:], nil, [5]byte{}, note)
+		// Save to wallet - store the note secret key (not DH key)
+		p.Wallet.AddNote(note, noteSecretKey, nil, [5]byte{}, note)
 		walletPath := fmt.Sprintf("output/wallets/%s_wallet.json", p.Name)
-		os.MkdirAll("output/wallets", 0755)
 		if err := p.Wallet.Save(walletPath); err != nil {
 			errorColor.Printf("❌ Wallet save failed for %s: %v\n", p.Name, err)
 			os.Exit(1)
 		}
 
-		// Prepare for auction phase
+		// Prepare for auction phase - use DH public key for encryption
 		regPayloads[i] = exchange.RegistrationPayload{
 			Ciphertext: regResult.CAux,
-			PubKey:     toGnarkPoint(p.Pk),
+			PubKey:     toGnarkPoint(p.Pk), // DH public key for encryption
 		}
 
 		// Append to ledger
@@ -271,8 +365,8 @@ func main() {
 	infoColor.Println("  ⚖️  Running double auction mechanism...")
 	infoColor.Println("  🔐 Generating zero-knowledge proof for auction results...")
 
-	// Execute Algorithm 3 (Exchange)
-	txOut, auctionInfo, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), params, pkF10, ccsF10)
+	// Execute Algorithm 3 (Exchange) - now includes ledger as per paper specification
+	txOut, auctionInfo, proof, err := exchange.ExchangePhase(regPayloads, auctioneer.Sk.BigInt(new(big.Int)), ledger, params, pkF10, ccsF10)
 	if err != nil {
 		errorColor.Printf("❌ Auction phase failed: %v\n", err)
 		os.Exit(1)
@@ -304,7 +398,7 @@ func main() {
 	receivingStart := time.Now()
 	headerColor.Println("\n💰 PHASE 4: RECEIVING PHASE")
 
-	runReceivingPhase(participants, ledger, pkTx, ccsTx, vkTx, result)
+	runReceivingPhase(participants, ledger, pkTx10, ccsTx10, vkTx10, result)
 
 	result.PerformanceMetrics.ReceivingTime = time.Since(receivingStart)
 	result.PerformanceMetrics.TotalTime = time.Since(startTime)
@@ -422,9 +516,10 @@ func runReceivingPhase(participants []*zerocash.Participant, ledger *zerocash.Le
 				result.Participants[i].FinalStatus = "CLAIMED"
 			}
 
-			// Update final balances (simplified - in practice would need to decrypt)
-			result.Participants[i].FinalCoins = "CONFIDENTIAL"
-			result.Participants[i].FinalEnergy = "CONFIDENTIAL"
+			// Calculate actual final balances by decrypting the participant's notes
+			finalCoins, finalEnergy := calculateFinalBalances(p)
+			result.Participants[i].FinalCoins = finalCoins.String()
+			result.Participants[i].FinalEnergy = finalEnergy.String()
 		}
 	} else {
 		warningColor.Println("  ⚠️  Auctioneer failed to perform exchange - Initiating withdrawals...")
@@ -472,6 +567,16 @@ func displayFinalResults(result *ProtocolResult) {
 }
 
 // Helper functions
+
+// tryLoadKeys attempts to load both proving and verifying keys from disk
+func tryLoadKeys(pkPath, vkPath string) (groth16.ProvingKey, groth16.VerifyingKey, error) {
+	pk, pkErr := zerocash.LoadProvingKey(pkPath)
+	vk, vkErr := zerocash.LoadVerifyingKey(vkPath)
+	if pkErr != nil || vkErr != nil {
+		return nil, nil, fmt.Errorf("key loading failed: pk=%v, vk=%v", pkErr, vkErr)
+	}
+	return pk, vk, nil
+}
 
 func toGnarkPoint(p *zerocash.G1Affine) *sw_bls12377.G1Affine {
 	return &sw_bls12377.G1Affine{
@@ -614,6 +719,61 @@ func generateMarkdownSummary(result *ProtocolResult) string {
 	sb.WriteString("- **Auction Type:** Sealed-Bid Exchange Mechanism (SBExM)\n")
 
 	return sb.String()
+}
+
+// verifyRegistrationProof verifies a registration proof using the registration verifying key
+func verifyRegistrationProof(proofBytes []byte, cAux [5]*big.Int, note *zerocash.Note, bid *big.Int, vk groth16.VerifyingKey, ccs constraint.ConstraintSystem) error {
+	// Reconstruct the public witness
+	publicWitness := &register.CircuitTxRegister{
+		// Public inputs only
+		CmIn:          new(big.Int).SetBytes(note.Cm).String(),
+		GammaInEnergy: note.Value.Energy.String(),
+		GammaInCoins:  note.Value.Coins.String(),
+		Bid:           bid.String(),
+	}
+
+	// Set CAux values
+	for i := 0; i < 5; i++ {
+		publicWitness.CAux[i] = cAux[i].String()
+	}
+
+	// Create public witness
+	witness, err := frontend.NewWitness(publicWitness, ecc.BW6_761.ScalarField(), frontend.PublicOnly())
+	if err != nil {
+		return fmt.Errorf("failed to create public witness: %w", err)
+	}
+
+	// Deserialize proof
+	proof := groth16.NewProof(ecc.BW6_761)
+	if _, err := proof.ReadFrom(bytes.NewReader(proofBytes)); err != nil {
+		return fmt.Errorf("failed to deserialize proof: %w", err)
+	}
+
+	// Verify proof
+	if err := groth16.Verify(proof, vk, witness); err != nil {
+		return fmt.Errorf("proof verification failed: %w", err)
+	}
+
+	return nil
+}
+
+// calculateFinalBalances decrypts and sums all unspent notes for a participant
+func calculateFinalBalances(participant *zerocash.Participant) (*big.Int, *big.Int) {
+	totalCoins := big.NewInt(0)
+	totalEnergy := big.NewInt(0)
+
+	// Get all unspent notes from the participant's wallet
+	unspentNotes := participant.Wallet.GetUnspentNotes()
+
+	for _, note := range unspentNotes {
+		if note != nil && note.Value.Coins != nil && note.Value.Energy != nil {
+			// Add the values from each unspent note
+			totalCoins.Add(totalCoins, note.Value.Coins)
+			totalEnergy.Add(totalEnergy, note.Value.Energy)
+		}
+	}
+
+	return totalCoins, totalEnergy
 }
 
 func min(a, b int) int {

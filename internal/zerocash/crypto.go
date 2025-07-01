@@ -25,13 +25,16 @@ func prf(sk, rho []byte) []byte {
 }
 
 // Commitment creates a commitment to note data using MiMC hash.
-// Commits to coins, energy, rho, and r.
-func Commitment(coins, energy, rho, r *big.Int) []byte {
+// Follows paper specification: cm = Com(Γ || pk || ρ, r)
+// where Γ = (coins, energy), pk is the public key, ρ is rho, and r is randomness
+func Commitment(coins, energy *big.Int, pk []byte, rho, r *big.Int) []byte {
 	h := mimcNative.NewMiMC()
-	h.Write(coins.Bytes())
-	h.Write(energy.Bytes())
-	h.Write(rho.Bytes())
-	h.Write(r.Bytes())
+	// Commit to Γ || pk || ρ with randomness r
+	h.Write(coins.Bytes())  // Γ.coins
+	h.Write(energy.Bytes()) // Γ.energy
+	h.Write(pk)             // pk (public key)
+	h.Write(rho.Bytes())    // ρ (rho)
+	h.Write(r.Bytes())      // r (randomness)
 	return h.Sum(nil)
 }
 
@@ -222,4 +225,29 @@ func NewMiMC() interface {
 	Reset()
 } {
 	return mimcNative.NewMiMC()
+}
+
+// MimcHashPublic is a wrapper for testing
+func MimcHashPublic(data []byte) *big.Int {
+	hash := mimcHash(data)
+	return new(big.Int).SetBytes(hash)
+}
+
+// SerialNumber computes a serial number from secret key and rho
+func SerialNumber(sk, rho []byte) []byte {
+	h := mimcNative.NewMiMC()
+	h.Write(sk)
+	h.Write(rho)
+	return h.Sum(nil)
+}
+
+// RandomBytesPublic generates random bytes (exposed for testing)
+func RandomBytesPublic(n int) []byte {
+	return randomBytes(n)
+}
+
+// GnarkG1Affine is a type alias for testing
+type GnarkG1Affine struct {
+	X string
+	Y string
 }
