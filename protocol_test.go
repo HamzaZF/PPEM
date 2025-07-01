@@ -9,6 +9,7 @@ import (
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
+	"github.com/consensys/gnark-crypto/ecc/bw6-761/fr/mimc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
@@ -24,6 +25,46 @@ import (
 // =============================================================================
 // 1. INFRASTRUCTURE/BUILDING BLOCK TESTS
 // =============================================================================
+
+// Helper function to compute MiMC commitment exactly like the circuit does
+func computeMimcCommitment(coins, energy, pk, rho, r *big.Int) *big.Int {
+	h := mimc.NewMiMC()
+	h.Write(coins.Bytes())
+	h.Write(energy.Bytes())
+	h.Write(pk.Bytes())
+	h.Write(rho.Bytes())
+	h.Write(r.Bytes())
+	return new(big.Int).SetBytes(h.Sum(nil))
+}
+
+// Helper function to compute DH-OTP encryption exactly like the circuit does
+func computeDHOTPEncryption(bid, skIn, pkOut *big.Int, pkT sw_bls12377.G1Affine) [3]*big.Int {
+	h := mimc.NewMiMC()
+
+	// Parse the pkT coordinates (they are strings in the test context)
+	pkTX := new(big.Int)
+	pkTY := new(big.Int)
+	pkTX.SetString(pkT.X.(string), 10)
+	pkTY.SetString(pkT.Y.(string), 10)
+
+	// Generate encryption masks using MiMC hash chain
+	h.Write(pkTX.Bytes())
+	h.Write(pkTY.Bytes())
+	mask1 := new(big.Int).SetBytes(h.Sum(nil))
+
+	h.Write(mask1.Bytes())
+	mask2 := new(big.Int).SetBytes(h.Sum(nil))
+
+	h.Write(mask2.Bytes())
+	mask3 := new(big.Int).SetBytes(h.Sum(nil))
+
+	// Perform DH-OTP encryption: ciphertext = plaintext + mask
+	bidEnc := new(big.Int).Add(bid, mask1)
+	skInEnc := new(big.Int).Add(skIn, mask2)
+	pkOutEnc := new(big.Int).Add(pkOut, mask3)
+
+	return [3]*big.Int{bidEnc, skInEnc, pkOutEnc}
+}
 
 func TestCryptographicPrimitives(t *testing.T) {
 	t.Run("MiMC Hash Function", func(t *testing.T) {
@@ -566,44 +607,72 @@ func TestAlgorithm3Exchange(t *testing.T) {
 func TestAlgorithm4Withdraw(t *testing.T) {
 	// Setup circuit keys
 	var circuitWithdraw withdraw.CircuitWithdraw
-	ccsWithdraw, _ := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitWithdraw)
-	pkWithdraw, vkWithdraw, _ := groth16.Setup(ccsWithdraw)
+	ccsWithdraw, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitWithdraw)
+	if err != nil {
+		t.Fatalf("CircuitWithdraw compilation failed: %v", err)
+	}
+	pkWithdraw, vkWithdraw, err := groth16.Setup(ccsWithdraw)
+	if err != nil {
+		t.Fatalf("CircuitWithdraw key generation failed: %v", err)
+	}
 
 	t.Run("Valid Withdrawal", func(t *testing.T) {
-		// Create input note
+		// Create input note with proper commitment
+		inCoins := big.NewInt(100)
+		inEnergy := big.NewInt(50)
+		inPk := big.NewInt(12345)
+		inRho := big.NewInt(111)
+		inR := big.NewInt(222)
+
+		// Compute the commitment using MiMC like the circuit does
+		inCm := computeMimcCommitment(inCoins, inEnergy, inPk, inRho, inR)
+
 		nIn := withdraw.Note{
-			Coins:  big.NewInt(100),
-			Energy: big.NewInt(50),
-			Pk:     big.NewInt(12345),
-			Rho:    big.NewInt(111),
-			R:      big.NewInt(222),
-			Cm:     big.NewInt(333),
+			Coins:  inCoins,
+			Energy: inEnergy,
+			Pk:     inPk,
+			Rho:    inRho,
+			R:      inR,
+			Cm:     inCm,
 		}
 
-		// Create output note
+		// Create output note with proper commitment
+		outCoins := big.NewInt(90)  // Reduced by fee
+		outEnergy := big.NewInt(45) // Reduced by fee
+		outPk := big.NewInt(54321)
+		outRho := big.NewInt(444)
+		outR := big.NewInt(555)
+
+		// Compute the commitment using MiMC like the circuit does
+		outCm := computeMimcCommitment(outCoins, outEnergy, outPk, outRho, outR)
+
 		nOut := withdraw.Note{
-			Coins:  big.NewInt(90), // Reduced by fee
-			Energy: big.NewInt(45), // Reduced by fee
-			Pk:     big.NewInt(54321),
-			Rho:    big.NewInt(444),
-			R:      big.NewInt(555),
-			Cm:     big.NewInt(666),
+			Coins:  outCoins,
+			Energy: outEnergy,
+			Pk:     outPk,
+			Rho:    outRho,
+			R:      outR,
+			Cm:     outCm,
 		}
 
 		skIn := big.NewInt(12345)
 		bid := big.NewInt(25) // bid value instead of rEnc
 
 		// Create participant's public key
-		participantKp, _ := zerocash.GenerateDHKeyPair()
+		participantKp, err := zerocash.GenerateDHKeyPair()
+		if err != nil {
+			t.Fatalf("DH key generation failed: %v", err)
+		}
 		pkT := sw_bls12377.G1Affine{
 			X: participantKp.Pk.X.String(),
 			Y: participantKp.Pk.Y.String(),
 		}
 
-		// Create cipher aux
+		// Compute cipher aux using DH-OTP encryption like the circuit does
+		cipherAuxArray := computeDHOTPEncryption(bid, skIn, outPk, pkT)
 		var cipherAux [3]*big.Int
 		for i := 0; i < 3; i++ {
-			cipherAux[i] = big.NewInt(int64(1000 + i))
+			cipherAux[i] = cipherAuxArray[i]
 		}
 
 		// Execute withdrawal with correct parameter order
@@ -614,11 +683,18 @@ func TestAlgorithm4Withdraw(t *testing.T) {
 
 		// Validate results
 		if tx == nil {
-			t.Error("tx is nil")
+			t.Fatal("tx is nil")
 		}
 		if len(proof) == 0 {
-			t.Error("proof is empty")
+			t.Fatal("proof is empty")
 		}
+		if vkWithdraw == nil {
+			t.Fatal("vkWithdraw is nil")
+		}
+
+		t.Logf("tx: %+v", tx)
+		t.Logf("proof length: %d", len(proof))
+		t.Logf("vkWithdraw: %+v", vkWithdraw)
 
 		// Verify withdrawal proof
 		err = withdraw.VerifyWithdraw(tx, proof, vkWithdraw)
