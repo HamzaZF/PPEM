@@ -38,18 +38,19 @@ type Tx struct {
 	NewNote *Note  // The note being created
 	Proof   []byte // ZKP proof (opaque, Groth16)
 	// Public inputs for verification
-	OldCoin   string
-	OldEnergy string
-	CmOld     string
-	SnOld     string
-	PkOld     string
-	NewCoin   string
-	NewEnergy string
-	CmNew     string
-	CNew      []byte // Encrypted note data using ECDH + AES (changed from [6]string)
-	G         sw_bls12377.G1Affine
-	G_b       sw_bls12377.G1Affine
-	G_r       sw_bls12377.G1Affine
+	OldCoin     string
+	OldEnergy   string
+	CmOld       string
+	SnOld       string
+	PkOld       string
+	NewCoin     string
+	NewEnergy   string
+	CmNew       string
+	CNew        []byte    // Encrypted note data using ECDH + AES for auctioneer
+	CNewCircuit [6]string // Circuit-compatible encrypted values for verification
+	G           sw_bls12377.G1Affine
+	G_b         sw_bls12377.G1Affine
+	G_r         sw_bls12377.G1Affine
 }
 
 // CreateTx creates a new confidential transaction following Algorithm 1 from the paper.
@@ -67,22 +68,33 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 			fmt.Printf("value: %v, energy: %v\n", value, energy)
 		}
 	}()
-	// Step 1: Compute serial number for old note (prevents double-spending)
+	// Step 1: Validate that the secret key corresponds to the note owner
 	h := mimcNative.NewMiMC()
+	h.Write(oldSk)
+	expectedPkOwner := h.Sum(nil)
+	if !bytes.Equal(expectedPkOwner, oldNote.PkOwner) {
+		return nil, fmt.Errorf("secret key does not match note owner")
+	}
+
+	// Step 2: Compute serial number for old note (prevents double-spending)
+	h.Reset()
 	h.Write(oldSk)
 	h.Write(oldNote.Rho)
 	snOld := h.Sum(nil)
 
-	// Step 2: Compute rhoNew as H(snOld)
-	rhoNew := mimcHash(snOld)
+	// Step 3: Compute rhoNew as H(0||snOld) to match circuit constraint
+	h.Reset()
+	h.Write([]byte{0}) // Add index 0 for single note output
+	h.Write(snOld)     // Add serial number
+	rhoNew := h.Sum(nil)
 
-	// Step 3: Generate randomness for new note
+	// Step 4: Generate randomness for new note
 	randNew := randomBytes(32)
 
-	// Step 4: Compute commitment for new note following paper: cm = Com(Γ || pk || ρ, r)
+	// Step 5: Compute commitment for new note following paper: cm = Com(Γ || pk || ρ, r)
 	cmNew := Commitment(value, energy, pkNew, new(big.Int).SetBytes(rhoNew), new(big.Int).SetBytes(randNew))
 
-	// Step 5: Build new note
+	// Step 6: Build new note
 	newNote := &Note{
 		Value: Gamma{
 			Coins:  value,
@@ -94,7 +106,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		Cm:      cmNew,
 	}
 
-	// Step 6: Set up EC points for ZK circuit (using DH protocol for circuit compatibility)
+	// Step 7: Set up EC points for ZK circuit (using DH protocol for circuit compatibility)
 	var g1Jac, _, _, _ = bls12377.Generators()
 	var g, g_b, g_r, encKey bls12377.G1Affine
 	var b, r bls12377_fp.Element
@@ -113,13 +125,13 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 	g_r.ScalarMultiplication(&g, r.BigInt(new(big.Int)))
 	encKey.ScalarMultiplication(&g_b, r.BigInt(new(big.Int)))
 
-	// Step 7: Encrypt note data using ECDH + AES-256-GCM for auctioneer
+	// Step 8: Encrypt note data using ECDH + AES-256-GCM for auctioneer
 	encryptedNoteData, err := encryptNoteForAuctioneer(newNote, auctioneerECDHPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("note encryption failed: %w", err)
 	}
 
-	// Step 8: Build fake encrypted values for circuit compatibility (circuit expects [6]string)
+	// Step 9: Build fake encrypted values for circuit compatibility (circuit expects [6]string)
 	encVals := buildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	var cNewStrs [6]string
@@ -127,13 +139,18 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		cNewStrs[i] = encVals[i].String()
 	}
 
-	// Step 9: Build witness for the circuit
+	// Step 10: Compute PkOld as H(skOld) to match circuit constraint
+	h.Reset()
+	h.Write(oldSk)
+	pkOldComputed := h.Sum(nil)
+
+	// Step 11: Build witness for the circuit
 	witness := &CircuitTx{
 		OldCoin:   oldNote.Value.Coins.String(),
 		OldEnergy: oldNote.Value.Energy.String(),
 		CmOld:     new(big.Int).SetBytes(oldNote.Cm).String(),
 		SnOld:     new(big.Int).SetBytes(snOld).String(),
-		PkOld:     new(big.Int).SetBytes(oldNote.PkOwner).String(),
+		PkOld:     new(big.Int).SetBytes(pkOldComputed).String(),
 		NewCoin:   newNote.Value.Coins.String(),
 		NewEnergy: newNote.Value.Energy.String(),
 		CmNew:     new(big.Int).SetBytes(newNote.Cm).String(),
@@ -168,21 +185,22 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		return nil, fmt.Errorf("proof marshaling failed: %w", err)
 	}
 	return &Tx{
-		OldNote:   oldNote,
-		NewNote:   newNote,
-		Proof:     proofBuf.Bytes(),
-		OldCoin:   oldNote.Value.Coins.String(),
-		OldEnergy: oldNote.Value.Energy.String(),
-		CmOld:     new(big.Int).SetBytes(oldNote.Cm).String(),
-		SnOld:     new(big.Int).SetBytes(snOld).String(),
-		PkOld:     new(big.Int).SetBytes(oldNote.PkOwner).String(),
-		NewCoin:   newNote.Value.Coins.String(),
-		NewEnergy: newNote.Value.Energy.String(),
-		CmNew:     new(big.Int).SetBytes(newNote.Cm).String(),
-		CNew:      encryptedNoteData, // Real encrypted note data for auctioneer
-		G:         toGnarkPoint(g),
-		G_b:       toGnarkPoint(g_b),
-		G_r:       toGnarkPoint(g_r),
+		OldNote:     oldNote,
+		NewNote:     newNote,
+		Proof:       proofBuf.Bytes(),
+		OldCoin:     oldNote.Value.Coins.String(),
+		OldEnergy:   oldNote.Value.Energy.String(),
+		CmOld:       new(big.Int).SetBytes(oldNote.Cm).String(),
+		SnOld:       new(big.Int).SetBytes(snOld).String(),
+		PkOld:       new(big.Int).SetBytes(pkOldComputed).String(),
+		NewCoin:     newNote.Value.Coins.String(),
+		NewEnergy:   newNote.Value.Energy.String(),
+		CmNew:       new(big.Int).SetBytes(newNote.Cm).String(),
+		CNew:        encryptedNoteData, // Real encrypted note data for auctioneer
+		CNewCircuit: cNewStrs,          // Circuit-compatible values for verification
+		G:           toGnarkPoint(g),
+		G_b:         toGnarkPoint(g_b),
+		G_r:         toGnarkPoint(g_r),
 	}, nil
 }
 
@@ -212,8 +230,8 @@ func VerifyTx(tx *Tx, params *Params, vk groth16.VerifyingKey) error {
 		NewEnergy: tx.NewEnergy,
 		CmNew:     tx.CmNew,
 		CNew: [6]frontend.Variable{
-			tx.CNew[0], tx.CNew[1], tx.CNew[2],
-			tx.CNew[3], tx.CNew[4], tx.CNew[5],
+			tx.CNewCircuit[0], tx.CNewCircuit[1], tx.CNewCircuit[2],
+			tx.CNewCircuit[3], tx.CNewCircuit[4], tx.CNewCircuit[5],
 		},
 		G:   tx.G,
 		G_b: tx.G_b,

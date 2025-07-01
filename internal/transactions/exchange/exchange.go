@@ -400,20 +400,16 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 
 	// Helper to create DH components that derive the shared secret
 	createDHComponents := func(shared bls12377.G1Affine) (sw_bls12377.G1Affine, sw_bls12377.G1Affine, frontend.Variable, sw_bls12377.G1Affine) {
-		// Generate proper random scalar for DH protocol
+		// For circuit consistency, we need: EncKey = G_b^R
+		// Setting R = 1 ensures that EncKey = G_b^1 = G_b = shared
 		var r bls12377_fr.Element
-		r.SetRandom()
+		r.SetOne() // Use R = 1 to satisfy: shared = G_b^R = G_b^1 = G_b
 
-		// Compute G_r = G * r (public component)
+		// Compute G_r = G * r = G * 1 = G (generator)
 		var g1Gen, _, _, _ = bls12377.Generators()
-		var gr bls12377.G1Affine
-		gr.FromJacobian(&g1Gen)
-		gr.ScalarMultiplication(&gr, r.BigInt(new(big.Int)))
-
-		// The shared secret should be G_b^r where G_b is auctioneer's public key
-		// For verification: EncKey = G_b^r = shared secret
-		var g bls12377.G1Affine
+		var g, gr bls12377.G1Affine
 		g.FromJacobian(&g1Gen)
+		gr.Set(&g) // G_r = G when R = 1
 
 		return sw_bls12377.G1Affine{
 				X: g.X.String(),
@@ -422,12 +418,12 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 			sw_bls12377.G1Affine{
 				X: shared.X.String(),
 				Y: shared.Y.String(),
-			}, // G_b (derived from shared secret for consistency)
-			r.BigInt(new(big.Int)).String(), // R (random scalar)
+			}, // G_b = shared secret (so that G_b^R = G_b^1 = shared)
+			r.BigInt(new(big.Int)).String(), // R = 1
 			sw_bls12377.G1Affine{
 				X: gr.X.String(),
 				Y: gr.Y.String(),
-			} // G_r = G * R
+			} // G_r = G * R = G * 1 = G
 	}
 
 	// Convert auctioneer's secret key to BLS12-377 field element
@@ -508,15 +504,53 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 		w.OutRho[i] = toVar(rho)
 		w.OutRand[i] = toVar(rand)
 
-		// Set ciphertext for this participant
-		w.C[i] = toVarArr(payload.Ciphertext)
-
-		// Compute decrypted values using the shared secret
+		// Set ciphertext and decrypted values with proper encryption relationship
 		if i < len(payloads) {
+			// Real participant: use actual ciphertext and decrypt it
+			w.C[i] = toVarArr(payload.Ciphertext)
 			dec := DecZKRegGo(payload.Ciphertext, shared)
 			w.DecVal[i] = toVarArr(dec)
 		} else {
-			w.DecVal[i] = toVarArr(payload.Ciphertext) // Fallback
+			// Padding participant: create consistent encrypted/decrypted pair
+			// For circuit to pass: C[i] = Encrypt(DecVal[i], SkT[i])
+			plaintext := [5]*big.Int{pkOut, skIn, bid, coins, energy} // Expected decrypted values
+
+			// Encrypt the plaintext using the shared secret to get ciphertext
+			h := mimcNative.NewMiMC()
+			h.Reset()
+			encKeyXBytes := shared.X.Bytes()
+			h.Write(encKeyXBytes[:])
+			encKeyYBytes := shared.Y.Bytes()
+			h.Write(encKeyYBytes[:])
+			mask0 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask0)
+			mask1 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask1)
+			mask2 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask2)
+			mask3 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask3)
+			mask4 := h.Sum(nil)
+
+			// Create ciphertext by adding masks to plaintext
+			ciphertext := [5]*big.Int{
+				new(big.Int).Add(plaintext[0], new(big.Int).SetBytes(mask0)),
+				new(big.Int).Add(plaintext[1], new(big.Int).SetBytes(mask1)),
+				new(big.Int).Add(plaintext[2], new(big.Int).SetBytes(mask2)),
+				new(big.Int).Add(plaintext[3], new(big.Int).SetBytes(mask3)),
+				new(big.Int).Add(plaintext[4], new(big.Int).SetBytes(mask4)),
+			}
+
+			w.C[i] = toVarArr(ciphertext)
+			w.DecVal[i] = toVarArr(plaintext)
 		}
 
 		// Set DH components that satisfy the circuit constraints

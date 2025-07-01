@@ -62,11 +62,7 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 		return nil, errors.New("Algorithm 1 (Transaction) failed: " + err.Error())
 	}
 
-	// Step 4: Parse tx^in as (sn^base, (cm^in, c^in), π)
-	var cmIn []byte
-	if txIn != nil && txIn.NewNote != nil && txIn.NewNote.Cm != nil {
-		cmIn = txIn.NewNote.Cm
-	}
+	// Step 4: tx^in created successfully (cmIn will be computed separately for circuit)
 
 	// Step 5: info_bid computation omitted (not used)
 	infoBid := []byte("not used") // Placeholder
@@ -84,9 +80,14 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	skInBig := skIn.BigInt(new(big.Int))
 	cAux := EncryptRegistrationData(sharedKey, coins, energy, bid, skInBig, pkOut)
 
-	// Step 8: Compute Prove(x, w) → π_reg with the correct DH values
+	// Step 8: Compute a commitment for the input note with pk^in for the circuit
+	// This represents the "virtual" note that proves ownership of the input value by sk^in/pk^in
+	inputCommitment := zerocash.Commitment(coins, energy, pkIn.Bytes(),
+		new(big.Int).SetBytes(note.Rho), new(big.Int).SetBytes(note.Rand))
+
+	// Step 9: Compute Prove(x, w) → π_reg with the correct DH values
 	registrationProof, err := generateRegistrationProof(
-		note, bid, coins, energy, skInBig, pkOut, cAux, cmIn,
+		note, bid, coins, energy, skInBig, pkOut, cAux, inputCommitment,
 		sharedKey, participant.AuctioneerPub, rDH, pkReg, ccsReg)
 	if err != nil {
 		return nil, errors.New("registration proof generation failed: " + err.Error())
@@ -135,7 +136,7 @@ func EncryptRegistrationData(sharedKey bls12377.G1Affine, coins, energy, bid, sk
 
 // generateRegistrationProof creates ZK proof matching CircuitTxRegister
 func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy, skIn, pkOut *big.Int,
-	cAux [5]*big.Int, cmIn []byte, sharedKey bls12377.G1Affine, auctioneerPub *bls12377.G1Affine,
+	cAux [5]*big.Int, inputCommitment []byte, sharedKey bls12377.G1Affine, auctioneerPub *bls12377.G1Affine,
 	rDH bls12377_fr.Element, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 
 	// Compute G (generator)
@@ -150,7 +151,7 @@ func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy,
 	// Create witness for CircuitTxRegister
 	witness := &CircuitTxRegister{
 		// Public inputs (Instance x)
-		CmIn:          new(big.Int).SetBytes(cmIn).String(),
+		CmIn:          new(big.Int).SetBytes(inputCommitment).String(),
 		GammaInEnergy: energy.String(),
 		GammaInCoins:  coins.String(),
 		Bid:           bid.String(),

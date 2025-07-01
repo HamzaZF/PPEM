@@ -151,15 +151,21 @@ func TestEncryptionDecryption(t *testing.T) {
 		sharedKey2 := zerocash.ComputeDHShared(kp2.Sk, kp1.Pk)
 		decrypted := register.DecryptRegistrationData(ciphertext, *sharedKey2)
 
-		// Verify decryption
-		if decrypted[0].Cmp(coins) != 0 {
-			t.Error("Coins decryption failed")
+		// Verify decryption - order is: (pkOut, skIn, bid, coins, energy)
+		if decrypted[0].Cmp(pkOut) != 0 {
+			t.Error("PkOut decryption failed")
 		}
-		if decrypted[1].Cmp(energy) != 0 {
-			t.Error("Energy decryption failed")
+		if decrypted[1].Cmp(skIn) != 0 {
+			t.Error("SkIn decryption failed")
 		}
 		if decrypted[2].Cmp(bid) != 0 {
 			t.Error("Bid decryption failed")
+		}
+		if decrypted[3].Cmp(coins) != 0 {
+			t.Error("Coins decryption failed")
+		}
+		if decrypted[4].Cmp(energy) != 0 {
+			t.Error("Energy decryption failed")
 		}
 	})
 }
