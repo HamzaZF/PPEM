@@ -586,6 +586,17 @@ func GenerateProofF10(witness *CircuitTxF10, pk groth16.ProvingKey, ccs constrai
 	return proofBuf.Bytes(), nil
 }
 
+// ExchangeTransaction represents the transaction output of the exchange phase
+type ExchangeTransaction struct {
+	Participants int                     `json:"participants"`
+	Inputs       []DecryptedRegistration `json:"inputs"`
+	Outputs      []DecryptedRegistration `json:"outputs"`
+	TotalValue   *big.Int                `json:"total_value"`
+	TotalEnergy  *big.Int                `json:"total_energy"`
+	Timestamp    int64                   `json:"timestamp"`
+	ProofData    []byte                  `json:"proof_data"`
+}
+
 // AuctionResult represents the output of the auction phase
 type AuctionResult struct {
 	WinnerID    string   `json:"winner_id"`
@@ -768,6 +779,17 @@ func ExchangePhaseWithNotes(
 		ProofHash:   proofHash,
 	}
 
+	// Create exchange transaction output
+	exchangeTx := &ExchangeTransaction{
+		Participants: len(inputs),
+		Inputs:       inputs,
+		Outputs:      outputs,
+		TotalValue:   totalCoins,
+		TotalEnergy:  totalEnergy,
+		Timestamp:    timestamp,
+		ProofData:    proof,
+	}
+
 	// 8. Return structured results
-	return nil, auctionResult, proof, nil
+	return exchangeTx, auctionResult, proof, nil
 }
