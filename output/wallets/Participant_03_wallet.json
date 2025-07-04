@@ -1,0 +1,80 @@
+{
+  "Name": "Participant_03",
+  "Sk": "8435965755225691191425328264208256029762961613212927708149339732904061887277",
+  "Pk": {
+    "X": "236085417784154447537831291551764649523374859880439165345246827369985071188999751077404028016582487024031922082167",
+    "Y": "33237541162543894998653802440242968381266181269867939913448932391134137385311772170019320246600557781529218620739"
+  },
+  "Notes": [
+    {
+      "Value": {
+        "Coins": 2000,
+        "Energy": 100
+      },
+      "PkOwner": "AX++r6DIn1I8kBCTuM+uKnV4W/wxqB6tZFwpscki8VozrcrqXVYZPAUcNqqwYGVT",
+      "Rho": "Tm2xrgFBwAF8GajsahAsdvy8Yx/x2odM3HBrHWIBmkE=",
+      "Rand": "LNq3lTkeOZFfzQpNYcPVyF6BtJJzbs1Ym0bfKb0GNWY=",
+      "Cm": "APwjnkKn/wNQcGJmVPIIw02lb6Q64vl9Fm6AgnqFlQL1wWCu9zhTOl5tmkdVC6GE"
+    },
+    {
+      "Value": {
+        "Coins": 5500,
+        "Energy": 275
+      },
+      "PkOwner": "oR6mS76ZBtzkdw65TqYuzeqGpBwuTzdwwnW3SZEeTPl5rUQcGL8o/8t4bkVCrBE=",
+      "Rho": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "Rand": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "Cm": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  ],
+  "NoteKeys": [
+    "Ju5NZBdUh3rNF6O0K4qz7bScGsVK5M8VaT6iSiQ1Yps=",
+    "EqaWYKmnwBT3UfdIwCD1XUaG8SUJjaBkCrzekjfS4y0="
+  ],
+  "Spent": [
+    false,
+    false
+  ],
+  "CAux": [
+    [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  ],
+  "WithdrawOutNote": [
+    {
+      "Value": {
+        "Coins": 2000,
+        "Energy": 100
+      },
+      "PkOwner": "AX++r6DIn1I8kBCTuM+uKnV4W/wxqB6tZFwpscki8VozrcrqXVYZPAUcNqqwYGVT",
+      "Rho": "Tm2xrgFBwAF8GajsahAsdvy8Yx/x2odM3HBrHWIBmkE=",
+      "Rand": "LNq3lTkeOZFfzQpNYcPVyF6BtJJzbs1Ym0bfKb0GNWY=",
+      "Cm": "APwjnkKn/wNQcGJmVPIIw02lb6Q64vl9Fm6AgnqFlQL1wWCu9zhTOl5tmkdVC6GE"
+    },
+    {
+      "Value": {
+        "Coins": 5500,
+        "Energy": 275
+      },
+      "PkOwner": "oR6mS76ZBtzkdw65TqYuzeqGpBwuTzdwwnW3SZEeTPl5rUQcGL8o/8t4bkVCrBE=",
+      "Rho": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "Rand": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "Cm": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  ]
+}
