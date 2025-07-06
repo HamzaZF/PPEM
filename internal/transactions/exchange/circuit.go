@@ -78,12 +78,11 @@ type CircuitTxF10 struct {
 	DecVal [10][5]frontend.Variable
 
 	// ----- DH Parameters for each coin -----
-	SkT    [10]sw_bls12377.G1Affine
 	R      [10]frontend.Variable
 	G      [10]sw_bls12377.G1Affine `gnark:",public"`
 	G_b    [10]sw_bls12377.G1Affine `gnark:",public"`
 	G_r    [10]sw_bls12377.G1Affine `gnark:",public"`
-	EncKey [10]sw_bls12377.G1Affine
+	EncKey [10]sw_bls12377.G1Affine // DH shared secret: used for both decryption and DH verification
 }
 
 // Define implements the constraints for CircuitTxF10 using arrays and for loops.
@@ -91,7 +90,7 @@ func (c *CircuitTxF10) Define(api frontend.API) error {
 	// Process all 10 coins using a for loop
 	for coin := 0; coin < 10; coin++ {
 		// --- Decrypt and verify the registration data ---
-		decVal := DecZKReg(api, c.C[coin][:], c.SkT[coin])
+		decVal := DecZKReg(api, c.C[coin][:], c.EncKey[coin])
 		for i := 0; i < 5; i++ {
 			api.AssertIsEqual(c.DecVal[coin][i], decVal[i])
 		}
@@ -115,7 +114,7 @@ func (c *CircuitTxF10) Define(api frontend.API) error {
 		api.AssertIsEqual(c.OutCm[coin], cm)
 
 		// --- Verify DH encryption constraints ---
-		// EncKey = G_b^R
+		// EncKey = G_b^R (same variable used for both decryption and DH verification)
 		G_r_b := new(sw_bls12377.G1Affine)
 		G_r_b.ScalarMul(api, c.G_b[coin], c.R[coin])
 		api.AssertIsEqual(c.EncKey[coin].X, G_r_b.X)

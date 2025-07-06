@@ -555,8 +555,8 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 
 		// Set DH components that satisfy the circuit constraints
 		w.G[i], w.G_b[i], w.R[i], w.G_r[i] = createDHComponents(shared)
-		w.EncKey[i] = toGnarkPoint(shared) // This is what the circuit will verify: EncKey[i] == G_b[i] * R[i]
-		w.SkT[i] = toGnarkPoint(shared)    // This is used for decryption
+		// FIXED: EncKey serves both purposes - DH verification and decryption
+		w.EncKey[i] = toGnarkPoint(shared) // Used for both DH verification (EncKey[i] == G_b[i] * R[i]) and decryption
 	}
 
 	return w
