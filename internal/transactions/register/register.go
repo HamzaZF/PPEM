@@ -24,6 +24,16 @@ type RegisterResult struct {
 	TxIn    *zerocash.Tx // tx^in: Output of Algorithm 1 (Transaction)
 	InfoBid []byte       // info_bid: Public information about funds and bid (simplified, not used in circuit)
 	Proof   []byte       // π_reg: ZK proof for registration
+
+	// CRITICAL FIX: Add the two keypairs that must be stored for later phases
+	SkIn  *big.Int // sk^in: Secret key for note TO auctioneer (needed for withdrawal)
+	PkIn  *big.Int // pk^in: Public key for note TO auctioneer
+	SkOut *big.Int // sk^out: Secret key for note FROM auctioneer (needed to spend result)
+	PkOut *big.Int // pk^out: Public key for note FROM auctioneer
+
+	// Shared secrets for both encryption mechanisms
+	DHSharedSecret   *bls12377.G1Affine // DH shared secret for DH-OTP
+	ECDHSharedSecret []byte             // ECDH shared secret for ECDH-AES (if applicable)
 }
 
 // Algorithm 2: Register(n^base, Γ^in, b_i) → (C^Aux, tx^in, info_bid, π_reg)
@@ -94,10 +104,16 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	}
 
 	return &RegisterResult{
-		CAux:    cAux,
-		TxIn:    txIn,
-		InfoBid: infoBid,
-		Proof:   registrationProof,
+		CAux:             cAux,
+		TxIn:             txIn,
+		InfoBid:          infoBid,
+		Proof:            registrationProof,
+		SkIn:             skInBig,
+		PkIn:             pkIn,
+		SkOut:            skOut.BigInt(new(big.Int)),
+		PkOut:            pkOut,
+		DHSharedSecret:   &sharedKey,
+		ECDHSharedSecret: nil, // ECDH shared secret is not provided in the original function
 	}, nil
 }
 

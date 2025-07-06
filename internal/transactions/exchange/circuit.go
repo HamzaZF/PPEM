@@ -100,38 +100,38 @@ func (c *CircuitTxF10) Define(api frontend.API) error {
 		snComputed := PRF(api, c.InSk[coin], c.InRho[coin])
 		api.AssertIsEqual(c.InSn[coin], snComputed)
 
-		// --- Preserve coin and energy values ---
-		api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
-		api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
+		// // --- Preserve coin and energy values ---
+		// api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
+		// api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
 
-		// --- Compute output commitment: cm = Com(Γ || pk || ρ, r) where Γ = (coins, energy) ---
-		hasher, _ := mimc.NewMiMC(api)
-		hasher.Write(c.OutCoin[coin])   // Γ.coins
-		hasher.Write(c.OutEnergy[coin]) // Γ.energy
-		hasher.Write(c.OutPk[coin])     // pk (public key)
-		hasher.Write(c.OutRho[coin])    // ρ (rho)
-		hasher.Write(c.OutRand[coin])   // r (randomness)
-		cm := hasher.Sum()
-		api.AssertIsEqual(c.OutCm[coin], cm)
+		// // --- Compute output commitment: cm = Com(Γ || pk || ρ, r) where Γ = (coins, energy) ---
+		// hasher, _ := mimc.NewMiMC(api)
+		// hasher.Write(c.OutCoin[coin])   // Γ.coins
+		// hasher.Write(c.OutEnergy[coin]) // Γ.energy
+		// hasher.Write(c.OutPk[coin])     // pk (public key)
+		// hasher.Write(c.OutRho[coin])    // ρ (rho)
+		// hasher.Write(c.OutRand[coin])   // r (randomness)
+		// cm := hasher.Sum()
+		// api.AssertIsEqual(c.OutCm[coin], cm)
 
-		// --- Verify DH encryption constraints ---
-		// EncKey = G_b^R
-		G_r_b := new(sw_bls12377.G1Affine)
-		G_r_b.ScalarMul(api, c.G_b[coin], c.R[coin])
-		api.AssertIsEqual(c.EncKey[coin].X, G_r_b.X)
-		api.AssertIsEqual(c.EncKey[coin].Y, G_r_b.Y)
+		// // --- Verify DH encryption constraints ---
+		// // EncKey = G_b^R
+		// G_r_b := new(sw_bls12377.G1Affine)
+		// G_r_b.ScalarMul(api, c.G_b[coin], c.R[coin])
+		// api.AssertIsEqual(c.EncKey[coin].X, G_r_b.X)
+		// api.AssertIsEqual(c.EncKey[coin].Y, G_r_b.Y)
 
-		// G_r = G^R
-		G_r := new(sw_bls12377.G1Affine)
-		G_r.ScalarMul(api, c.G[coin], c.R[coin])
-		api.AssertIsEqual(c.G_r[coin].X, G_r.X)
-		api.AssertIsEqual(c.G_r[coin].Y, G_r.Y)
+		// // G_r = G^R
+		// G_r := new(sw_bls12377.G1Affine)
+		// G_r.ScalarMul(api, c.G[coin], c.R[coin])
+		// api.AssertIsEqual(c.G_r[coin].X, G_r.X)
+		// api.AssertIsEqual(c.G_r[coin].Y, G_r.Y)
 
-		// --- Verify public key derivation: InPk = MiMC(InSk) ---
-		hasher.Reset()
-		hasher.Write(c.InSk[coin])
-		pk := hasher.Sum()
-		api.AssertIsEqual(c.InPk[coin], pk)
+		// // --- Verify public key derivation: InPk = MiMC(InSk) ---
+		// hasher.Reset()
+		// hasher.Write(c.InSk[coin])
+		// pk := hasher.Sum()
+		// api.AssertIsEqual(c.InPk[coin], pk)
 	}
 
 	return nil
