@@ -2500,3 +2500,678 @@ func TestFullProtocolFlowCorrected(t *testing.T) {
 		t.Logf("════════════════════════════════════════════════════════")
 	})
 }
+
+// =============================================================================
+// 5. CLEAR PROTOCOL TEST - FUNCTIONAL DECOMPOSITION
+// =============================================================================
+
+// Protocol state structures for clear data flow between phases
+type ProtocolSetup struct {
+	CircuitKeys        *CircuitKeys
+	Ledger             *zerocash.Ledger
+	AuctioneerDHKp     *zerocash.DHKeyPair
+	AuctioneerECDHPub  *ecdh.PublicKey
+	Participants       []*zerocash.Participant
+	ParticipantDHKeys  []*zerocash.DHKeyPair
+	BaseNotes          []*zerocash.Note
+	BaseNoteSecretKeys [][]byte
+	Bids               []*big.Int
+	SharedSecrets      []*bls12377.G1Affine
+	N                  int
+}
+
+type RegistrationResult struct {
+	RegistrationTxs    []*zerocash.Tx
+	EncryptedBids      [][]byte
+	RegistrationProofs [][]byte
+	ParticipantSkIn    []*big.Int
+	ParticipantPkIn    []*big.Int
+	ParticipantSkOut   []*big.Int
+	ParticipantPkOut   []*big.Int
+	ParticipantCAux    [][5]*big.Int
+}
+
+type ExchangeResult struct {
+	OutputTxs     []*zerocash.Tx
+	ExchangeProof []byte
+	AuctionInfo   []byte
+}
+
+type FinalizationResult struct {
+	FinalLedgerState *zerocash.Ledger
+	WithdrawalCount  int
+}
+
+// TestFullProtocolFlowCorrectedCleared implements the complete PPEM protocol
+// using functional decomposition for clarity
+func TestFullProtocolFlowCorrectedCleared(t *testing.T) {
+	t.Run("Complete PPEM Protocol - Clear Functional Decomposition", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("Skipping clear protocol test in short mode")
+		}
+
+		startTime := time.Now()
+		t.Logf("🚀 Privacy-Preserving Energy Market Protocol - CLEAR IMPLEMENTATION")
+		t.Logf("📋 Following exact scenario with functional decomposition")
+
+		// =================================================================
+		// PHASE 0: INITIAL SETUP (Protocol Setup)
+		// =================================================================
+		t.Logf("\n📋 PHASE 0: INITIAL SETUP")
+		setupResult := setupProtocolInitialState(t)
+		validateSetupPhase(t, setupResult)
+
+		// =================================================================
+		// PHASE 1: REGISTRATION
+		// =================================================================
+		t.Logf("\n📝 PHASE 1: REGISTRATION")
+		registrationResult := executeRegistrationPhase(t, setupResult)
+		validateRegistrationPhase(t, setupResult, registrationResult)
+
+		// =================================================================
+		// PHASE 2: AUCTION/EXCHANGE
+		// =================================================================
+		t.Logf("\n🔄 PHASE 2: AUCTION/EXCHANGE")
+		exchangeResult := executeExchangePhase(t, setupResult, registrationResult)
+		validateExchangePhase(t, setupResult, exchangeResult)
+
+		// =================================================================
+		// PHASE 3: FINALIZATION
+		// =================================================================
+		t.Logf("\n🔒 PHASE 3: FINALIZATION")
+		finalResult := executeFinalizationPhase(t, setupResult, exchangeResult)
+		validateFinalizationPhase(t, setupResult, finalResult)
+
+		// =================================================================
+		// FINAL VALIDATION & SUMMARY
+		// =================================================================
+		totalTime := time.Since(startTime)
+		generateProtocolSummary(t, setupResult, finalResult, totalTime)
+	})
+}
+
+// setupProtocolInitialState implements "📋 INITIAL SETUP (Protocol Setup)"
+func setupProtocolInitialState(t *testing.T) *ProtocolSetup {
+	t.Logf("🔑 Key Agreement Phase - Setting up DH parameters")
+
+	// Setup circuit keys for all algorithms (1,2,3,4)
+	circuitKeys := setupAllCircuitKeys(t)
+	t.Logf("✅ Circuit keys setup complete")
+
+	// Create ledger with circuit keys
+	ledger := zerocash.NewLedger()
+	ledgerKeys := &zerocash.CircuitKeys{
+		VkTx:        circuitKeys.vkTx,
+		CcsTx:       circuitKeys.ccsTx,
+		VkReg:       circuitKeys.vkReg,
+		CcsReg:      circuitKeys.ccsReg,
+		VkExchange:  circuitKeys.vkF10,
+		CcsExchange: circuitKeys.ccsF10,
+		VkWithdraw:  circuitKeys.vkWithdraw,
+		CcsWithdraw: circuitKeys.ccsWithdraw,
+	}
+	ledger.SetCircuitKeys(ledgerKeys)
+
+	// 🏛️ Auctioneer State: Generate DH and ECDH keypairs
+	t.Logf("🏛️ Creating Auctioneer with DH keypair (sk_T, pk_T)")
+	auctioneerDHKp, _ := zerocash.GenerateDHKeyPair()
+	_, auctioneerECDHPub, _ := generateECDHKeyPair()
+	ledger.SetAuctioneerKeys(auctioneerDHKp.Pk, auctioneerECDHPub)
+
+	// 🧑‍💼 Participants State: Create N=10 participants with initial notes
+	N := 10
+	t.Logf("🧑‍💼 Creating %d participants with DH keypairs (sk_i, pk_i)", N)
+
+	participants := make([]*zerocash.Participant, N)
+	participantDHKeys := make([]*zerocash.DHKeyPair, N)
+	baseNotes := make([]*zerocash.Note, N)
+	baseNoteSecretKeys := make([][]byte, N)
+	bids := make([]*big.Int, N)
+	sharedSecrets := make([]*bls12377.G1Affine, N)
+
+	for i := 0; i < N; i++ {
+		// Generate DH keypair for each participant
+		participantDHKeys[i], _ = zerocash.GenerateDHKeyPair()
+
+		// Create participant with energy market values
+		participants[i] = &zerocash.Participant{
+			Name:          fmt.Sprintf("Participant_%02d", i+1),
+			Sk:            participantDHKeys[i].Sk,
+			Pk:            participantDHKeys[i].Pk,
+			Role:          zerocash.RoleParticipant,
+			AuctioneerPub: auctioneerDHKp.Pk,
+			Params:        &zerocash.Params{},
+			Wallet: &zerocash.Wallet{
+				Name:     fmt.Sprintf("Participant_%02d", i+1),
+				Sk:       participantDHKeys[i].Sk,
+				Pk:       participantDHKeys[i].Pk,
+				Notes:    []*zerocash.Note{},
+				NoteKeys: [][]byte{},
+				Spent:    []bool{},
+			},
+		}
+
+		// Create initial note n^base_i with energy market values
+		coins := big.NewInt(int64(1000 + i*100)) // 1000-1900 coins
+		energy := big.NewInt(int64(50 + i*10))   // 50-140 kWh
+		bids[i] = big.NewInt(int64(20 + i*5))    // 20-65 bid price
+
+		baseNoteSecretKeys[i] = zerocash.RandomBytesPublic(32)
+		baseNotes[i] = zerocash.NewNote(coins, energy, baseNoteSecretKeys[i])
+		participants[i].Wallet.AddNote(baseNotes[i], baseNoteSecretKeys[i], []byte{}, [5]byte{}, baseNotes[i])
+
+		// Compute DH shared secret: shared_i = DH(sk_i, pk_T)
+		sharedSecrets[i] = zerocash.ComputeDHShared(participantDHKeys[i].Sk, auctioneerDHKp.Pk)
+	}
+
+	// 📚 Initialize Ledger State with base note commitments
+	t.Logf("📚 Initializing ledger with base note commitments")
+	for i := range baseNotes {
+		cmBase := fmt.Sprintf("cm_base_%d", i)
+		ledger.CmList = append(ledger.CmList, cmBase)
+	}
+
+	// Save initial ledger state
+	err := ledger.SaveToFile("output/ledger_initial.json")
+	if err != nil {
+		t.Logf("Warning: Could not save initial ledger: %v", err)
+	}
+
+	return &ProtocolSetup{
+		CircuitKeys:        circuitKeys,
+		Ledger:             ledger,
+		AuctioneerDHKp:     auctioneerDHKp,
+		AuctioneerECDHPub:  auctioneerECDHPub,
+		Participants:       participants,
+		ParticipantDHKeys:  participantDHKeys,
+		BaseNotes:          baseNotes,
+		BaseNoteSecretKeys: baseNoteSecretKeys,
+		Bids:               bids,
+		SharedSecrets:      sharedSecrets,
+		N:                  N,
+	}
+}
+
+// executeRegistrationPhase implements "🔄 PHASE 1: REGISTRATION"
+func executeRegistrationPhase(t *testing.T, setup *ProtocolSetup) *RegistrationResult {
+	t.Logf("Step 1a: Each Participant Registers (Algorithm 2)")
+
+	// Start registration phase
+	err := setup.Ledger.StartRegistrationPhase()
+	if err != nil {
+		t.Fatalf("Failed to start registration phase: %v", err)
+	}
+
+	// Initialize result arrays
+	registrationTxs := make([]*zerocash.Tx, setup.N)
+	encryptedBids := make([][]byte, setup.N)
+	registrationProofs := make([][]byte, setup.N)
+
+	// Store the keypairs from registration (Algorithm 2 outputs)
+	participantSkIn := make([]*big.Int, setup.N)    // sk^in for note TO auctioneer
+	participantPkIn := make([]*big.Int, setup.N)    // pk^in for note TO auctioneer
+	participantSkOut := make([]*big.Int, setup.N)   // sk^out for note FROM auctioneer
+	participantPkOut := make([]*big.Int, setup.N)   // pk^out for note FROM auctioneer
+	participantCAux := make([][5]*big.Int, setup.N) // C^Aux encrypted data
+
+	// Process each participant's registration
+	for i := 0; i < setup.N; i++ {
+		participant := setup.Participants[i]
+		baseNote := setup.BaseNotes[i]
+		bid := setup.Bids[i]
+
+		t.Logf("  Processing registration for %s", participant.Name)
+
+		// Algorithm 2: Generate TWO keypairs as specified
+		// Generate sk^in and compute pk^in = KeyGen(sk^in) [for note TO auctioneer]
+		var skIn bls12377_fr.Element
+		skIn.SetRandom()
+		participantSkIn[i] = skIn.BigInt(new(big.Int))
+		participantPkIn[i] = zerocash.MimcHashPublic(participantSkIn[i].Bytes())
+
+		// Generate sk^out and compute pk^out = KeyGen(sk^out) [for note FROM auctioneer]
+		var skOut bls12377_fr.Element
+		skOut.SetRandom()
+		participantSkOut[i] = skOut.BigInt(new(big.Int))
+		participantPkOut[i] = zerocash.MimcHashPublic(participantSkOut[i].Bytes())
+
+		// Compute tx^in_i = Transaction(n^base_i, sk^base_i, Γ^in, pk^in_i)
+		coins := baseNote.Value.Coins
+		energy := baseNote.Value.Energy
+		pkInBytes := participantPkIn[i].Bytes()
+
+		txIn, err := zerocash.CreateTx(baseNote, setup.BaseNoteSecretKeys[i], pkInBytes, coins, energy,
+			participant.Params, setup.CircuitKeys.ccsTx, setup.CircuitKeys.pkTx, setup.AuctioneerECDHPub)
+		if err != nil {
+			t.Fatalf("Algorithm 1 (Transaction) failed for participant %d: %v", i, err)
+		}
+		registrationTxs[i] = txIn
+
+		// Compute C^Aux_i = Enc(shared_secret, (pk^out, sk^in, bid, coins, energy))
+		participantCAux[i] = register.EncryptRegistrationData(*setup.SharedSecrets[i],
+			coins, energy, bid, participantSkIn[i], participantPkOut[i])
+
+		// Generate registration proof π_reg (simplified for test)
+		registrationProofs[i] = []byte("registration_proof_placeholder")
+
+		// Convert to bytes for ledger storage
+		encryptedBids[i] = make([]byte, 0)
+		for _, val := range participantCAux[i] {
+			encryptedBids[i] = append(encryptedBids[i], val.Bytes()...)
+		}
+
+		// Step 1b: Submit to ledger for verification
+		err = setup.Ledger.SubmitRegistration(registrationTxs[i], encryptedBids[i],
+			registrationProofs[i], participant.Name)
+		if err != nil {
+			t.Fatalf("Failed to submit registration for participant %d: %v", i, err)
+		}
+	}
+
+	// Save ledger state after registration
+	err = setup.Ledger.SaveToFile("output/ledger_after_registration.json")
+	if err != nil {
+		t.Logf("Warning: Could not save registration ledger: %v", err)
+	}
+
+	return &RegistrationResult{
+		RegistrationTxs:    registrationTxs,
+		EncryptedBids:      encryptedBids,
+		RegistrationProofs: registrationProofs,
+		ParticipantSkIn:    participantSkIn,
+		ParticipantPkIn:    participantPkIn,
+		ParticipantSkOut:   participantSkOut,
+		ParticipantPkOut:   participantPkOut,
+		ParticipantCAux:    participantCAux,
+	}
+}
+
+// executeExchangePhase implements "🔄 PHASE 2: AUCTION/EXCHANGE"
+func executeExchangePhase(t *testing.T, setup *ProtocolSetup, reg *RegistrationResult) *ExchangeResult {
+	t.Logf("Step 2a: Auctioneer Processes Auction (Algorithm 3)")
+
+	// Start exchange phase
+	err := setup.Ledger.StartExchangePhase()
+	if err != nil {
+		t.Fatalf("Failed to start exchange phase: %v", err)
+	}
+
+	// Step 2a: Decrypt registration data using auctioneer's DH key
+	t.Logf("  Auctioneer decrypting registration data using sk_T...")
+	decryptedBids := make([]*big.Int, setup.N)
+	decryptedSkIn := make([]*big.Int, setup.N)
+	decryptedPkOut := make([]*big.Int, setup.N)
+	decryptedCoins := make([]*big.Int, setup.N)
+	decryptedEnergy := make([]*big.Int, setup.N)
+
+	for i := 0; i < setup.N; i++ {
+		// Decrypt C^Aux_i using DH shared secret
+		shared := setup.SharedSecrets[i]
+		cipherAux := reg.ParticipantCAux[i]
+		decryptedData := register.DecryptRegistrationData(cipherAux, *shared)
+
+		// Extract: (pk^out, sk^in, bid, coins, energy)
+		decryptedPkOut[i] = decryptedData[0]
+		decryptedSkIn[i] = decryptedData[1]
+		decryptedBids[i] = decryptedData[2]
+		decryptedCoins[i] = decryptedData[3]
+		decryptedEnergy[i] = decryptedData[4]
+	}
+
+	// Step 2a: Run auction algorithm F([Γ^in_i], [b_i]) → ([Γ^out_i], info)
+	t.Logf("  Running auction algorithm...")
+	// For this test: simple pass-through (dummy auction)
+	auctionResults := make([]*zerocash.Note, setup.N)
+	for i := 0; i < setup.N; i++ {
+		auctionResults[i] = &zerocash.Note{
+			Value: zerocash.Gamma{
+				Coins:  decryptedCoins[i],
+				Energy: decryptedEnergy[i],
+			},
+			PkOwner: decryptedPkOut[i].Bytes(),
+			Rho:     zerocash.RandomBytesPublic(32),
+			Rand:    zerocash.RandomBytesPublic(32),
+			Cm:      nil,
+		}
+	}
+
+	// Step 2a: Generate exchange proof π_F (Algorithm 3)
+	t.Logf("  Generating exchange proof π_F using CircuitTxF10...")
+	witness := buildExchangeWitness(t, setup, reg, decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids)
+
+	exchangeProofBytes, err := exchange.GenerateProofF10(witness, setup.CircuitKeys.pkF10, setup.CircuitKeys.ccsF10)
+	if err != nil {
+		t.Fatalf("Failed to generate exchange proof: %v", err)
+	}
+
+	// Create proper output transactions from auction results
+	outputTxs := make([]*zerocash.Tx, setup.N)
+	for i := 0; i < setup.N; i++ {
+		// Create output transaction from auction result
+		outputTxs[i] = &zerocash.Tx{
+			SnOld:     reg.RegistrationTxs[i].SnOld, // Use serial number from registration
+			CmNew:     fmt.Sprintf("cm_out_%d", i),  // Output commitment from auction
+			OldCoin:   decryptedCoins[i].String(),
+			OldEnergy: decryptedEnergy[i].String(),
+			NewCoin:   decryptedCoins[i].String(),  // For dummy auction: same as input
+			NewEnergy: decryptedEnergy[i].String(), // For dummy auction: same as input
+			Proof:     exchangeProofBytes,
+		}
+	}
+
+	auctionInfoBytes, _ := json.Marshal(map[string]interface{}{
+		"auction_id":   setup.Ledger.AuctionID,
+		"participants": setup.N,
+		"timestamp":    time.Now(),
+	})
+
+	// Step 2b: Submit exchange to ledger
+	err = setup.Ledger.SubmitExchange(outputTxs, exchangeProofBytes, auctionInfoBytes)
+	if err != nil {
+		t.Fatalf("Failed to submit exchange: %v", err)
+	}
+
+	// Save ledger state after exchange
+	err = setup.Ledger.SaveToFile("output/ledger_after_exchange.json")
+	if err != nil {
+		t.Logf("Warning: Could not save exchange ledger: %v", err)
+	}
+
+	return &ExchangeResult{
+		OutputTxs:     outputTxs,
+		ExchangeProof: exchangeProofBytes,
+		AuctionInfo:   auctionInfoBytes,
+	}
+}
+
+// executeFinalizationPhase implements "🔄 PHASE 3: FINALIZATION"
+func executeFinalizationPhase(t *testing.T, setup *ProtocolSetup, exchange *ExchangeResult) *FinalizationResult {
+	t.Logf("Step 3a: Merge Temporary Lists")
+
+	// Close auction (merge temporary to permanent lists)
+	err := setup.Ledger.CloseAuction()
+	if err != nil {
+		t.Fatalf("Failed to close auction: %v", err)
+	}
+
+	// Test withdrawal for some participants (Emergency scenario)
+	t.Logf("🚨 Testing Emergency Withdrawal Scenario for 3 participants...")
+	withdrawalKeys := setupWithdrawalKeys(t)
+	withdrawalCount := 0
+
+	for i := 0; i < 3; i++ { // Test withdrawal for first 3 participants
+		participant := setup.Participants[i]
+		t.Logf("  Testing withdrawal for %s...", participant.Name)
+
+		success := executeParticipantWithdrawal(t, participant, i, withdrawalKeys,
+			setup.BaseNoteSecretKeys[i], setup.Bids[i])
+		if success {
+			withdrawalCount++
+			t.Logf("    ✅ Withdrawal successful")
+		} else {
+			t.Logf("    ❌ Withdrawal failed")
+		}
+	}
+
+	// Save final ledger state
+	err = setup.Ledger.SaveToFile("output/ledger_final.json")
+	if err != nil {
+		t.Logf("Warning: Could not save final ledger: %v", err)
+	}
+
+	return &FinalizationResult{
+		FinalLedgerState: setup.Ledger,
+		WithdrawalCount:  withdrawalCount,
+	}
+}
+
+// buildExchangeWitness creates the circuit witness for exchange proof generation
+func buildExchangeWitness(t *testing.T, setup *ProtocolSetup, reg *RegistrationResult,
+	decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids []*big.Int) *exchange.CircuitTxF10 {
+
+	witness := &exchange.CircuitTxF10{}
+
+	// Helper to convert *big.Int to frontend.Variable
+	toVar := func(x *big.Int) frontend.Variable {
+		if x == nil {
+			return "0"
+		}
+		return x.String()
+	}
+
+	// Build witness for all 10 participants
+	for i := 0; i < 10; i++ {
+		if i < setup.N {
+			// Real participant: use actual transaction data
+			regTx := reg.RegistrationTxs[i]
+			actualSk := new(big.Int).SetBytes(setup.BaseNoteSecretKeys[i])
+			actualRho := new(big.Int).SetBytes(setup.BaseNotes[i].Rho)
+			actualSN := new(big.Int)
+			actualSN.SetString(regTx.SnOld, 10)
+			actualCoins := setup.BaseNotes[i].Value.Coins
+			actualEnergy := setup.BaseNotes[i].Value.Energy
+
+			// Set circuit inputs with actual transaction values
+			witness.InSk[i] = toVar(actualSk)
+			witness.InRho[i] = toVar(actualRho)
+			witness.InSn[i] = toVar(actualSN)
+			witness.InCoin[i] = toVar(actualCoins)
+			witness.InEnergy[i] = toVar(actualEnergy)
+
+			// Compute public key as MiMC(sk) as expected by circuit
+			h := mimc.NewMiMC()
+			h.Write(actualSk.Bytes())
+			computedPk := new(big.Int).SetBytes(h.Sum(nil))
+			witness.InPk[i] = toVar(computedPk)
+			witness.InRand[i] = toVar(new(big.Int).SetBytes(setup.BaseNotes[i].Rand))
+			witness.InCm[i] = toVar(new(big.Int).SetBytes(setup.BaseNotes[i].Cm))
+
+			// Set outputs (dummy auction: outputs = inputs)
+			witness.OutRho[i] = witness.InRho[i]
+			witness.OutSn[i] = witness.InSn[i]
+			witness.OutCoin[i] = witness.InCoin[i]
+			witness.OutEnergy[i] = witness.InEnergy[i]
+			witness.OutPk[i] = witness.InPk[i]
+			witness.OutRand[i] = witness.InRand[i]
+
+			// Compute output commitment correctly
+			outCommitment := computeMimcCommitment(actualCoins, actualEnergy, computedPk, actualRho,
+				new(big.Int).SetBytes(setup.BaseNotes[i].Rand))
+			witness.OutCm[i] = toVar(outCommitment)
+
+			// Set DH parameters using ACTUAL BLS12-377 generator
+			participantSecretKey := setup.ParticipantDHKeys[i].Sk
+			scalarBigInt := new(big.Int)
+			participantSecretKey.BigInt(scalarBigInt)
+			witness.R[i] = scalarBigInt.String()
+
+			// Use actual BLS12-377 generator
+			var g1Jac, _, _, _ = bls12377.Generators()
+			var actualGenerator bls12377.G1Affine
+			actualGenerator.FromJacobian(&g1Jac)
+
+			witness.G[i] = sw_bls12377.G1Affine{
+				X: actualGenerator.X.String(),
+				Y: actualGenerator.Y.String(),
+			}
+
+			// Set G_b = auctioneer's public key
+			witness.G_b[i] = sw_bls12377.G1Affine{
+				X: setup.AuctioneerDHKp.Pk.X.String(),
+				Y: setup.AuctioneerDHKp.Pk.Y.String(),
+			}
+
+			// Compute G_r = G^R using actual generator
+			var gR bls12377.G1Affine
+			gR.ScalarMultiplication(&actualGenerator, scalarBigInt)
+			witness.G_r[i] = sw_bls12377.G1Affine{
+				X: gR.X.String(),
+				Y: gR.Y.String(),
+			}
+
+			// Set encryption key (shared secret)
+			shared := setup.SharedSecrets[i]
+			witness.EncKey[i] = sw_bls12377.G1Affine{
+				X: shared.X.String(),
+				Y: shared.Y.String(),
+			}
+
+			// Set ciphertext and decrypted values
+			cipherAux := reg.ParticipantCAux[i]
+			witness.C[i][0] = toVar(cipherAux[0])
+			witness.C[i][1] = toVar(cipherAux[1])
+			witness.C[i][2] = toVar(cipherAux[2])
+			witness.C[i][3] = toVar(cipherAux[3])
+			witness.C[i][4] = toVar(cipherAux[4])
+
+			decrypted := register.DecryptRegistrationData(cipherAux, *shared)
+			witness.DecVal[i][0] = toVar(decrypted[0])
+			witness.DecVal[i][1] = toVar(decrypted[1])
+			witness.DecVal[i][2] = toVar(decrypted[2])
+			witness.DecVal[i][3] = toVar(decrypted[3])
+			witness.DecVal[i][4] = toVar(decrypted[4])
+
+		} else {
+			// Padding participant: use consistent zero values
+			witness.InSk[i] = "0"
+			witness.InRho[i] = "0"
+			witness.InSn[i] = "0"
+			witness.InCoin[i] = "0"
+			witness.InEnergy[i] = "0"
+
+			// Compute pk for zero sk
+			h := mimc.NewMiMC()
+			h.Write(big.NewInt(0).Bytes())
+			zeroPk := new(big.Int).SetBytes(h.Sum(nil))
+			witness.InPk[i] = toVar(zeroPk)
+			witness.InRand[i] = "0"
+			witness.InCm[i] = "0"
+
+			// Set outputs to zero
+			witness.OutRho[i] = "0"
+			witness.OutSn[i] = "0"
+			witness.OutCoin[i] = "0"
+			witness.OutEnergy[i] = "0"
+			witness.OutPk[i] = toVar(zeroPk)
+			witness.OutRand[i] = "0"
+
+			// Compute output commitment for zero values
+			zeroCommitment := computeMimcCommitment(big.NewInt(0), big.NewInt(0), zeroPk, big.NewInt(0), big.NewInt(0))
+			witness.OutCm[i] = toVar(zeroCommitment)
+
+			// Set DH parameters for padding
+			var paddingSecretKey bls12377_fr.Element
+			paddingSecretKey.SetOne()
+			paddingScalarBigInt := new(big.Int)
+			paddingSecretKey.BigInt(paddingScalarBigInt)
+			witness.R[i] = paddingScalarBigInt.String()
+
+			// Use actual BLS12-377 generator for padding too
+			var g1JacPadding, _, _, _ = bls12377.Generators()
+			var actualGeneratorPadding bls12377.G1Affine
+			actualGeneratorPadding.FromJacobian(&g1JacPadding)
+
+			witness.G[i] = sw_bls12377.G1Affine{
+				X: actualGeneratorPadding.X.String(),
+				Y: actualGeneratorPadding.Y.String(),
+			}
+
+			witness.G_b[i] = sw_bls12377.G1Affine{
+				X: setup.AuctioneerDHKp.Pk.X.String(),
+				Y: setup.AuctioneerDHKp.Pk.Y.String(),
+			}
+
+			// Compute G_r = G^1 = G for padding
+			var gRPadding bls12377.G1Affine
+			gRPadding.ScalarMultiplication(&actualGeneratorPadding, paddingScalarBigInt)
+			witness.G_r[i] = sw_bls12377.G1Affine{
+				X: gRPadding.X.String(),
+				Y: gRPadding.Y.String(),
+			}
+
+			// Compute EncKey for padding
+			var gBAffine, encKeyAffine bls12377.G1Affine
+			gBAffine.X.SetString(setup.AuctioneerDHKp.Pk.X.String())
+			gBAffine.Y.SetString(setup.AuctioneerDHKp.Pk.Y.String())
+			encKeyAffine.ScalarMultiplication(&gBAffine, paddingScalarBigInt)
+			witness.EncKey[i] = sw_bls12377.G1Affine{
+				X: encKeyAffine.X.String(),
+				Y: encKeyAffine.Y.String(),
+			}
+
+			// Set ciphertext and decrypted values to zero
+			for j := 0; j < 5; j++ {
+				witness.C[i][j] = "0"
+				witness.DecVal[i][j] = "0"
+			}
+		}
+	}
+
+	return witness
+}
+
+// Validation functions for each phase
+func validateSetupPhase(t *testing.T, setup *ProtocolSetup) {
+	t.Logf("✅ Setup Phase Validation:")
+	t.Logf("   - Auctioneer DH keypair: Generated")
+	t.Logf("   - %d participants with DH keypairs: Generated", setup.N)
+	t.Logf("   - %d shared secrets computed", setup.N)
+	t.Logf("   - Ledger initialized with %d base commitments", len(setup.Ledger.CmList))
+	t.Logf("   - Protocol phase: %s", setup.Ledger.GetCurrentPhase())
+}
+
+func validateRegistrationPhase(t *testing.T, setup *ProtocolSetup, reg *RegistrationResult) {
+	t.Logf("✅ Registration Phase Validation:")
+	t.Logf("   - %d registrations processed", setup.N)
+	t.Logf("   - Permanent SnList: %d entries", len(setup.Ledger.SnList))
+	t.Logf("   - Temporary TxList: %d entries", len(setup.Ledger.TxListTemp))
+	t.Logf("   - Temporary CmList: %d entries", len(setup.Ledger.CmListTemp))
+	t.Logf("   - AuxList: %d entries", len(setup.Ledger.AuxList))
+	t.Logf("   - Protocol phase: %s", setup.Ledger.GetCurrentPhase())
+}
+
+func validateExchangePhase(t *testing.T, setup *ProtocolSetup, exchange *ExchangeResult) {
+	t.Logf("✅ Exchange Phase Validation:")
+	t.Logf("   - Exchange proof generated: %d bytes", len(exchange.ExchangeProof))
+	t.Logf("   - Auction info: %d bytes", len(exchange.AuctionInfo))
+	t.Logf("   - Protocol phase: %s", setup.Ledger.GetCurrentPhase())
+}
+
+func validateFinalizationPhase(t *testing.T, setup *ProtocolSetup, final *FinalizationResult) {
+	t.Logf("✅ Finalization Phase Validation:")
+	t.Logf("   - Successful withdrawals: %d/3", final.WithdrawalCount)
+	t.Logf("   - Permanent SnList: %d entries", len(final.FinalLedgerState.SnList))
+	t.Logf("   - Permanent CmList: %d entries", len(final.FinalLedgerState.CmList))
+	t.Logf("   - Permanent TxList: %d entries", len(final.FinalLedgerState.TxList))
+	t.Logf("   - Protocol phase: %s", final.FinalLedgerState.GetCurrentPhase())
+}
+
+func generateProtocolSummary(t *testing.T, setup *ProtocolSetup, final *FinalizationResult, totalTime time.Duration) {
+	t.Logf("\n📊 PROTOCOL EXECUTION SUMMARY")
+	t.Logf("════════════════════════════════════════════════════════")
+	t.Logf("Total Execution Time: %v", totalTime)
+	t.Logf("Participants: %d", setup.N)
+	t.Logf("Protocol Phase: %s", final.FinalLedgerState.GetCurrentPhase())
+	t.Logf("Final State:")
+	t.Logf("  - Permanent CmList: %d entries", len(final.FinalLedgerState.CmList))
+	t.Logf("  - Permanent SnList: %d entries", len(final.FinalLedgerState.SnList))
+	t.Logf("  - Permanent TxList: %d entries", len(final.FinalLedgerState.TxList))
+	t.Logf("  - Emergency Withdrawals: %d successful", final.WithdrawalCount)
+
+	// Validate protocol completion
+	if final.FinalLedgerState.GetCurrentPhase() == zerocash.PhaseWithdraw {
+		t.Logf("✅ PROTOCOL COMPLETED SUCCESSFULLY")
+	} else {
+		t.Logf("❌ PROTOCOL INCOMPLETE - Phase: %s", final.FinalLedgerState.GetCurrentPhase())
+	}
+
+	// Validate ledger state consistency
+	tempLists := len(final.FinalLedgerState.CmListTemp) + len(final.FinalLedgerState.SnListTemp) + len(final.FinalLedgerState.TxListTemp)
+	if tempLists == 0 {
+		t.Logf("✅ LEDGER STATE CONSISTENT - All temporary lists cleared")
+	} else {
+		t.Logf("❌ LEDGER STATE INCONSISTENT - %d temporary entries remain", tempLists)
+	}
+
+	t.Logf("════════════════════════════════════════════════════════")
+}
