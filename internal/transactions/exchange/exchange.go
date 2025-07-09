@@ -91,8 +91,8 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 	return results, nil
 }
 
-// DecryptTransactionNotes decrypts the note data from transactions using ECDH private key
-func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivKey *ecdh.PrivateKey) ([]DecryptedRegistration, error) {
+// DecryptTransactionNotes decrypts the note data from transactions using permanent ECDH keys
+func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivKey *ecdh.PrivateKey, participantECDHPubKeys []*ecdh.PublicKey) ([]DecryptedRegistration, error) {
 	results := make([]DecryptedRegistration, len(payloads))
 
 	for i, payload := range payloads {
@@ -100,7 +100,11 @@ func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivK
 
 		// Decrypt transaction note data if present
 		if len(payload.TxNoteData) > 0 {
-			noteData, err := zerocash.DecryptNoteFromAuctioneer(payload.TxNoteData, auctioneerECDHPrivKey)
+			if i >= len(participantECDHPubKeys) || participantECDHPubKeys[i] == nil {
+				return nil, fmt.Errorf("missing participant ECDH public key for participant %d", i)
+			}
+
+			noteData, err := zerocash.DecryptNoteFromAuctioneerWithPermanentKey(payload.TxNoteData, auctioneerECDHPrivKey, participantECDHPubKeys[i])
 			if err != nil {
 				return nil, fmt.Errorf("failed to decrypt note data for participant %d: %w", i, err)
 			}
@@ -687,6 +691,7 @@ func ExchangePhaseWithNotes(
 	regPayloads []RegistrationPayload,
 	auctioneerSk *big.Int,
 	auctioneerECDHPrivKey *ecdh.PrivateKey,
+	participantECDHPubKeys []*ecdh.PublicKey,
 	ledger *zerocash.Ledger,
 	params *zerocash.Params,
 	pk groth16.ProvingKey,
@@ -699,6 +704,9 @@ func ExchangePhaseWithNotes(
 	if auctioneerECDHPrivKey == nil {
 		return nil, nil, nil, fmt.Errorf("auctioneer ECDH private key is required")
 	}
+	if len(participantECDHPubKeys) != len(regPayloads) {
+		return nil, nil, nil, fmt.Errorf("participant ECDH public keys count mismatch: expected %d, got %d", len(regPayloads), len(participantECDHPubKeys))
+	}
 
 	// 1. Decrypt registration data (from Algorithm 2 - DH+OTP encryption)
 	regInputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
@@ -707,7 +715,7 @@ func ExchangePhaseWithNotes(
 	}
 
 	// 2. Decrypt transaction note data (from Algorithm 1 - ECDH+AES encryption)
-	noteInputs, err := DecryptTransactionNotes(regPayloads, auctioneerECDHPrivKey)
+	noteInputs, err := DecryptTransactionNotes(regPayloads, auctioneerECDHPrivKey, participantECDHPubKeys)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to decrypt transaction notes: %w", err)
 	}

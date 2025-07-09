@@ -14,6 +14,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -57,8 +58,9 @@ type Tx struct {
 // Algorithm 1: Transaction([n_i^old]^n_{i=1}, [sk_i^old]^n_{i=1}, [Γ_j^new]^m_{j=1}, [pk_j]^m_{j=1}) → (tx)
 // Note: pk is passed as parameter, not computed inside (as per Algorithm 1)
 // auctioneerECDHPubKey: Auctioneer's ECDH public key for note encryption
+// participantECDHPrivKey: Participant's permanent ECDH private key for note encryption (Option 1)
 func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params *Params,
-	ccs constraint.ConstraintSystem, pk groth16.ProvingKey, auctioneerECDHPubKey *ecdh.PublicKey) (*Tx, error) {
+	ccs constraint.ConstraintSystem, pk groth16.ProvingKey, auctioneerECDHPubKey *ecdh.PublicKey, participantECDHPrivKey *ecdh.PrivateKey) (*Tx, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("[PANIC RECOVERED] in CreateTx. Witness struct:")
@@ -125,8 +127,8 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 	g_r.ScalarMultiplication(&g, r.BigInt(new(big.Int)))
 	encKey.ScalarMultiplication(&g_b, r.BigInt(new(big.Int)))
 
-	// Step 8: Encrypt note data using ECDH + AES-256-GCM for auctioneer
-	encryptedNoteData, err := encryptNoteForAuctioneer(newNote, auctioneerECDHPubKey)
+	// Step 8: Encrypt note data using participant's permanent ECDH key + AES-256-GCM for auctioneer
+	encryptedNoteData, err := encryptNoteWithPermanentKey(newNote, auctioneerECDHPubKey, participantECDHPrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("note encryption failed: %w", err)
 	}
@@ -391,25 +393,18 @@ func SetupOrLoadKeys(ccs constraint.ConstraintSystem, pkPath, vkPath string) (gr
 	return pk, vk, nil
 }
 
-// encryptNoteForAuctioneer encrypts note data using ECDH + AES-256-GCM
-func encryptNoteForAuctioneer(note *Note, auctioneerECDHPubKey *ecdh.PublicKey) ([]byte, error) {
-	// 1. Generate ephemeral ECDH key pair
-	ephemeralPrivKey, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
-	}
-	ephemeralPubKey := ephemeralPrivKey.PublicKey()
-
-	// 2. Compute shared secret
-	sharedSecret, err := ephemeralPrivKey.ECDH(auctioneerECDHPubKey)
+// encryptNoteWithPermanentKey encrypts note data using permanent ECDH key + AES-256-GCM
+func encryptNoteWithPermanentKey(note *Note, auctioneerECDHPubKey *ecdh.PublicKey, participantECDHPrivKey *ecdh.PrivateKey) ([]byte, error) {
+	// 1. Compute shared secret
+	sharedSecret, err := participantECDHPrivKey.ECDH(auctioneerECDHPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("ECDH computation failed: %w", err)
 	}
 
-	// 3. Derive AES key from shared secret
+	// 2. Derive AES key from shared secret
 	aesKey := sha256.Sum256(sharedSecret)
 
-	// 4. Prepare note data for encryption
+	// 3. Prepare note data for encryption
 	noteData := map[string]interface{}{
 		"pk":     note.PkOwner,
 		"coins":  note.Value.Coins.String(),
@@ -424,7 +419,7 @@ func encryptNoteForAuctioneer(note *Note, auctioneerECDHPubKey *ecdh.PublicKey) 
 		return nil, fmt.Errorf("JSON marshaling failed: %w", err)
 	}
 
-	// 5. Encrypt with AES-256-GCM
+	// 4. Encrypt with AES-256-GCM
 	aesCipher, err := aes.NewCipher(aesKey[:])
 	if err != nil {
 		return nil, fmt.Errorf("AES cipher creation failed: %w", err)
@@ -442,17 +437,92 @@ func encryptNoteForAuctioneer(note *Note, auctioneerECDHPubKey *ecdh.PublicKey) 
 
 	ciphertext := gcm.Seal(nil, nonce, plaintextBytes, nil)
 
-	// 6. Return (ephemeralPubKey + nonce + ciphertext)
-	ephemeralPubKeyBytes := ephemeralPubKey.Bytes()
-	result := make([]byte, 0, len(ephemeralPubKeyBytes)+len(nonce)+len(ciphertext))
-	result = append(result, ephemeralPubKeyBytes...)
-	result = append(result, nonce...)
-	result = append(result, ciphertext...)
-
-	return result, nil
+	// 5. Return (ciphertext + nonce)
+	return append(ciphertext, nonce...), nil
 }
 
-// DecryptNoteFromAuctioneer decrypts note data using ECDH + AES-256-GCM
+// DecryptNoteFromAuctioneerWithPermanentKey decrypts note data using permanent ECDH key + AES-256-GCM
+func DecryptNoteFromAuctioneerWithPermanentKey(encryptedData []byte, auctioneerECDHPrivKey *ecdh.PrivateKey, participantECDHPubKey *ecdh.PublicKey) (*Note, error) {
+	// 1. Compute shared secret using permanent keys
+	sharedSecret, err := auctioneerECDHPrivKey.ECDH(participantECDHPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("ECDH computation failed: %w", err)
+	}
+
+	// 2. Derive AES key from shared secret
+	aesKey := sha256.Sum256(sharedSecret)
+
+	// 3. Create AES-GCM cipher
+	aesCipher, err := aes.NewCipher(aesKey[:])
+	if err != nil {
+		return nil, fmt.Errorf("AES cipher creation failed: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return nil, fmt.Errorf("GCM creation failed: %w", err)
+	}
+
+	// 4. Extract ciphertext and nonce
+	if len(encryptedData) < gcm.NonceSize() {
+		return nil, fmt.Errorf("encrypted data too short for nonce")
+	}
+
+	nonceSize := gcm.NonceSize()
+	ciphertext := encryptedData[:len(encryptedData)-nonceSize]
+	nonce := encryptedData[len(encryptedData)-nonceSize:]
+
+	// 5. Decrypt
+	plaintextBytes, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
+	// 6. Unmarshal note data
+	var noteData map[string]interface{}
+	if err := json.Unmarshal(plaintextBytes, &noteData); err != nil {
+		return nil, fmt.Errorf("JSON unmarshaling failed: %w", err)
+	}
+
+	// 7. Reconstruct note
+	coins := new(big.Int)
+	coins.SetString(noteData["coins"].(string), 10)
+	energy := new(big.Int)
+	energy.SetString(noteData["energy"].(string), 10)
+
+	// Convert base64 strings back to byte slices
+	pkOwner, err := base64.StdEncoding.DecodeString(noteData["pk"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode pk: %w", err)
+	}
+	rho, err := base64.StdEncoding.DecodeString(noteData["rho"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode rho: %w", err)
+	}
+	rand, err := base64.StdEncoding.DecodeString(noteData["rand"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode rand: %w", err)
+	}
+	cm, err := base64.StdEncoding.DecodeString(noteData["cm"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cm: %w", err)
+	}
+
+	note := &Note{
+		Value: Gamma{
+			Coins:  coins,
+			Energy: energy,
+		},
+		PkOwner: pkOwner,
+		Rho:     rho,
+		Rand:    rand,
+		Cm:      cm,
+	}
+
+	return note, nil
+}
+
+// DecryptNoteFromAuctioneer decrypts note data using ECDH + AES-256-GCM (legacy ephemeral key version)
 func DecryptNoteFromAuctioneer(encryptedData []byte, auctioneerECDHPrivKey *ecdh.PrivateKey) (*Note, error) {
 	// 1. Extract ephemeral public key (first 65 bytes for P256 uncompressed)
 	if len(encryptedData) < 65 {
@@ -512,15 +582,33 @@ func DecryptNoteFromAuctioneer(encryptedData []byte, auctioneerECDHPrivKey *ecdh
 	energy := new(big.Int)
 	energy.SetString(noteData["energy"].(string), 10)
 
+	// Convert base64 strings back to byte slices
+	pkOwner, err := base64.StdEncoding.DecodeString(noteData["pk"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode pk: %w", err)
+	}
+	rho, err := base64.StdEncoding.DecodeString(noteData["rho"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode rho: %w", err)
+	}
+	rand, err := base64.StdEncoding.DecodeString(noteData["rand"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode rand: %w", err)
+	}
+	cm, err := base64.StdEncoding.DecodeString(noteData["cm"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cm: %w", err)
+	}
+
 	note := &Note{
 		Value: Gamma{
 			Coins:  coins,
 			Energy: energy,
 		},
-		PkOwner: noteData["pk"].([]byte),
-		Rho:     noteData["rho"].([]byte),
-		Rand:    noteData["rand"].([]byte),
-		Cm:      noteData["cm"].([]byte),
+		PkOwner: pkOwner,
+		Rho:     rho,
+		Rand:    rand,
+		Cm:      cm,
 	}
 
 	return note, nil
