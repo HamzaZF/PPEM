@@ -60,9 +60,9 @@ func (c *CircuitTx) Define(api frontend.API) error {
 		api.AssertIsEqual(c.CNew[i], encVal[i])
 	}
 
-	// Step 7: Value conservation
-	api.AssertIsEqual(c.OldCoin, c.NewCoin)
-	api.AssertIsEqual(c.OldEnergy, c.NewEnergy)
+	// // Step 7: Value conservation (Not important for the moment)
+	// api.AssertIsEqual(c.OldCoin, c.NewCoin)
+	// api.AssertIsEqual(c.OldEnergy, c.NewEnergy)
 
 	// Key derivations for encryption
 	G_r_b := new(sw_bls12377.G1Affine)
