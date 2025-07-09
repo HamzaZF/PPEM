@@ -459,11 +459,11 @@ func clearExecuteRegistrationPhase(t *testing.T, setup *ClearProtocolSetup) *Cle
 		}
 		registrationTxs[i] = txIn
 
-		// Compute C^Aux_i = Enc(shared_secret, (pk^out, sk^in, bid, coins, energy))
-		// CRITICAL FIX: Algorithm 2 specifies order as (pk^out, sk^in, bid, Γ^in)
-		// where Γ^in = (coins, energy), so final order is (pk^out, sk^in, bid, coins, energy)
+		// Compute C^Aux_i = Enc(shared_secret, (Γ^in, b, sk^in, pk^out))
+		// CRITICAL FIX: Algorithm 2 specifies C^Aux_i = Enc(pk_T, (Γ^in, b, sk^in, pk^out))
+		// where Γ^in = (coins, energy), so order is (coins, energy, bid, sk^in, pk^out)
 		participantCAux[i] = register.EncryptRegistrationData(*setup.SharedSecrets[i],
-			participantPkOut[i], participantSkIn[i], bid, coins, energy)
+			coins, energy, bid, participantSkIn[i], participantPkOut[i])
 
 		// Generate registration proof π_reg using Algorithm 2 circuit
 		registrationProofs[i] = []byte("registration_proof_placeholder_v2")
