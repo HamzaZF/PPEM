@@ -133,7 +133,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		return nil, fmt.Errorf("note encryption failed: %w", err)
 	}
 
-	// Step 9: Build fake encrypted values for circuit compatibility (circuit expects [6]string)
+	// Step 9: Build encrypted note data for circuit verification (circuit expects [6]string)
 	encVals := buildEncMimc(encKey, newNote.PkOwner, newNote.Value.Coins, newNote.Value.Energy,
 		new(big.Int).SetBytes(newNote.Rho), new(big.Int).SetBytes(newNote.Rand), newNote.Cm)
 	var cNewStrs [6]string

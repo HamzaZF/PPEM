@@ -78,12 +78,7 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 			Energy: decrypted[4], // energy
 		}
 
-		// NEW: Decrypt the note data from CreateTx if present
-		if len(payload.TxNoteData) > 0 {
-			// This requires the auctioneer's ECDH private key - we'll need to add this to the function
-			// For now, store the encrypted data and decrypt it later
-			// result.NoteData = payload.TxNoteData
-		}
+		// Note: Note data decryption is handled by DecryptTransactionNotes function
 
 		results[i] = result
 	}
@@ -314,8 +309,8 @@ func onesArray5() [5]frontend.Variable {
 	return [5]frontend.Variable{"1", "1", "1", "1", "1"}
 }
 
-// BuildWitnessF10 builds the witness for CircuitTxF10 from input/output notes using the new array-based structure.
-func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int) *CircuitTxF10 {
+// BuildWitnessF10 builds the witness for CircuitTxF10 from input/output notes using the new array-based structure and REAL participant DH private keys.
+func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *bls12377.G1Affine) *CircuitTxF10 {
 	w := &CircuitTxF10{}
 
 	// Helper to convert *big.Int to frontend.Variable with nil handling
@@ -402,32 +397,34 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 		}
 	}
 
-	// Helper to create DH components that derive the shared secret
-	createDHComponents := func(shared bls12377.G1Affine) (sw_bls12377.G1Affine, sw_bls12377.G1Affine, frontend.Variable, sw_bls12377.G1Affine) {
-		// For circuit consistency, we need: EncKey = G_b^R
-		// Setting R = 1 ensures that EncKey = G_b^1 = G_b = shared
-		var r bls12377_fr.Element
-		r.SetOne() // Use R = 1 to satisfy: shared = G_b^R = G_b^1 = G_b
+	// Helper to create DH components using REAL participant private keys
+	createDHComponents := func(shared bls12377.G1Affine, participantSk *bls12377_fr.Element, auctioneerPk *bls12377.G1Affine) (sw_bls12377.G1Affine, sw_bls12377.G1Affine, frontend.Variable, sw_bls12377.G1Affine) {
+		// Use REAL participant DH private key as R (not 1!)
+		// Circuit verifies: EncKey = G_b^R where R is participant's actual secret key
 
-		// Compute G_r = G * r = G * 1 = G (generator)
+		// Get the actual BLS12-377 generator (same as used in DH key generation)
 		var g1Gen, _, _, _ = bls12377.Generators()
-		var g, gr bls12377.G1Affine
+		var g bls12377.G1Affine
 		g.FromJacobian(&g1Gen)
-		gr.Set(&g) // G_r = G when R = 1
+
+		// Compute G_r = G^R where R is the participant's REAL private key
+		var gr bls12377.G1Affine
+		participantSkBig := participantSk.BigInt(new(big.Int))
+		gr.ScalarMultiplication(&g, participantSkBig)
 
 		return sw_bls12377.G1Affine{
 				X: g.X.String(),
 				Y: g.Y.String(),
-			}, // G (generator)
+			}, // G (actual BLS12-377 generator)
 			sw_bls12377.G1Affine{
-				X: shared.X.String(),
-				Y: shared.Y.String(),
-			}, // G_b = shared secret (so that G_b^R = G_b^1 = shared)
-			r.BigInt(new(big.Int)).String(), // R = 1
+				X: auctioneerPk.X.String(),
+				Y: auctioneerPk.Y.String(),
+			}, // G_b = auctioneer's public key
+			participantSkBig.String(), // R = participant's REAL DH private key
 			sw_bls12377.G1Affine{
 				X: gr.X.String(),
 				Y: gr.Y.String(),
-			} // G_r = G * R = G * 1 = G
+			} // G_r = G^R (using real private key)
 	}
 
 	// Convert auctioneer's secret key to BLS12-377 field element
@@ -557,8 +554,27 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 			w.DecVal[i] = toVarArr(plaintext)
 		}
 
-		// Set DH components that satisfy the circuit constraints
-		w.G[i], w.G_b[i], w.R[i], w.G_r[i] = createDHComponents(shared)
+		// Use REAL participant DH private key (passed as parameter)
+		var participantSk bls12377_fr.Element
+		if i < len(participantDHKeys) && participantDHKeys[i] != nil {
+			// Use the REAL participant DH private key passed to this function
+			participantSk.Set(participantDHKeys[i])
+		} else {
+			// Default for padding participants
+			participantSk.SetOne()
+		}
+
+		// Use the REAL auctioneer's public key (passed as parameter)
+		var auctioneerPk bls12377.G1Affine
+		if auctioneerDHPk != nil {
+			auctioneerPk.Set(auctioneerDHPk)
+		} else {
+			// Default fallback
+			auctioneerPk.Set(&shared)
+		}
+
+		// Set DH components that satisfy the circuit constraints using REAL keys
+		w.G[i], w.G_b[i], w.R[i], w.G_r[i] = createDHComponents(shared, &participantSk, &auctioneerPk)
 		// FIXED: EncKey serves both purposes - DH verification and decryption
 		w.EncKey[i] = toGnarkPoint(shared) // Used for both DH verification (EncKey[i] == G_b[i] * R[i]) and decryption
 	}
@@ -686,12 +702,14 @@ func validateExchangeInputs(
 	return nil
 }
 
-// Updated ExchangePhase that handles both registration data and transaction notes
+// Updated ExchangePhase that handles both registration data and transaction notes with REAL DH keys
 func ExchangePhaseWithNotes(
 	regPayloads []RegistrationPayload,
 	auctioneerSk *big.Int,
 	auctioneerECDHPrivKey *ecdh.PrivateKey,
 	participantECDHPubKeys []*ecdh.PublicKey,
+	participantDHKeys []*bls12377_fr.Element,
+	auctioneerDHPk *bls12377.G1Affine,
 	ledger *zerocash.Ledger,
 	params *zerocash.Params,
 	pk groth16.ProvingKey,
@@ -742,8 +760,8 @@ func ExchangePhaseWithNotes(
 	// 4. Run auction logic - sophisticated sealed-bid double auction mechanism
 	outputs := RunAuctionLogic(inputs)
 
-	// 5. Build witness for CircuitTxF10
-	witness := BuildWitnessF10(inputs, outputs, regPayloads, auctioneerSk)
+	// 5. Build witness for CircuitTxF10 using REAL participant DH private keys
+	witness := BuildWitnessF10(inputs, outputs, regPayloads, auctioneerSk, participantDHKeys, auctioneerDHPk)
 
 	// 6. Generate ZKP using CircuitTxF10
 	proof, err = GenerateProofF10(witness, pk, ccs)
