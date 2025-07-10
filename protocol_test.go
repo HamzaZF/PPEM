@@ -2701,7 +2701,7 @@ func TestFullProtocolFlowCorrectedCleared(t *testing.T) {
 		// PHASE 1: REGISTRATION
 		// =================================================================
 		t.Logf("\n📝 PHASE 1: REGISTRATION")
-		registrationResult := executeRegistrationPhase(t, setupResult)
+		registrationResult := executeRegistrationPhaseTest(t, setupResult)
 		validateRegistrationPhase(t, setupResult, registrationResult)
 
 		// =================================================================
@@ -2858,8 +2858,8 @@ func setupProtocolInitialState(t *testing.T) *ProtocolSetup {
 	}
 }
 
-// executeRegistrationPhase implements "🔄 PHASE 1: REGISTRATION"
-func executeRegistrationPhase(t *testing.T, setup *ProtocolSetup) *RegistrationResult {
+// executeRegistrationPhaseTest implements "🔄 PHASE 1: REGISTRATION"
+func executeRegistrationPhaseTest(t *testing.T, setup *ProtocolSetup) *RegistrationResult {
 	t.Logf("Step 1a: Each Participant Registers (Algorithm 2)")
 
 	// Start registration phase

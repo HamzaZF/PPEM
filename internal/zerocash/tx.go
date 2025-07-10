@@ -141,10 +141,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		cNewStrs[i] = encVals[i].String()
 	}
 
-	// Step 10: Compute PkOld as H(skOld) to match circuit constraint
-	h.Reset()
-	h.Write(oldSk)
-	pkOldComputed := h.Sum(nil)
+	// Step 10: Use actual PkOld from note (circuit will verify PkOld == H(skOld))
 
 	// Step 11: Build witness for the circuit
 	witness := &CircuitTx{
@@ -152,7 +149,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		OldEnergy: oldNote.Value.Energy.String(),
 		CmOld:     new(big.Int).SetBytes(oldNote.Cm).String(),
 		SnOld:     new(big.Int).SetBytes(snOld).String(),
-		PkOld:     new(big.Int).SetBytes(pkOldComputed).String(),
+		PkOld:     new(big.Int).SetBytes(oldNote.PkOwner).String(),
 		NewCoin:   newNote.Value.Coins.String(),
 		NewEnergy: newNote.Value.Energy.String(),
 		CmNew:     new(big.Int).SetBytes(newNote.Cm).String(),
@@ -194,7 +191,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		OldEnergy:   oldNote.Value.Energy.String(),
 		CmOld:       new(big.Int).SetBytes(oldNote.Cm).String(),
 		SnOld:       new(big.Int).SetBytes(snOld).String(),
-		PkOld:       new(big.Int).SetBytes(pkOldComputed).String(),
+		PkOld:       new(big.Int).SetBytes(oldNote.PkOwner).String(),
 		NewCoin:     newNote.Value.Coins.String(),
 		NewEnergy:   newNote.Value.Energy.String(),
 		CmNew:       new(big.Int).SetBytes(newNote.Cm).String(),

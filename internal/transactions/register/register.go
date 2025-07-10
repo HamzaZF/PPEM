@@ -76,7 +76,9 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 		return nil, errors.New("Algorithm 1 (Transaction) failed: " + err.Error())
 	}
 
-	// Step 4: tx^in created successfully (cmIn will be computed separately for circuit)
+	// Step 4: tx^in created successfully - use values from the newly created note n^in
+	coins = txIn.NewNote.Value.Coins
+	energy = txIn.NewNote.Value.Energy
 
 	// Step 5: info_bid computation omitted (not used)
 	infoBid := []byte("not used") // Placeholder
@@ -94,13 +96,12 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	cAux := EncryptRegistrationData(sharedKey, coins, energy, bid, skInBig, pkOut)
 
 	// Step 8: Compute a commitment for the input note with pk^in for the circuit
-	// This represents the "virtual" note that proves ownership of the input value by sk^in/pk^in
 	inputCommitment := zerocash.Commitment(coins, energy, pkIn.Bytes(),
-		new(big.Int).SetBytes(note.Rho), new(big.Int).SetBytes(note.Rand))
+		new(big.Int).SetBytes(txIn.NewNote.Rho), new(big.Int).SetBytes(txIn.NewNote.Rand))
 
 	// Step 9: Compute Prove(x, w) → π_reg with the correct DH values
 	registrationProof, err := generateRegistrationProof(
-		note, bid, coins, energy, skInBig, pkOut, cAux, inputCommitment,
+		txIn.NewNote, bid, coins, energy, skInBig, pkOut, cAux, inputCommitment,
 		sharedKey, participant.AuctioneerPub, rDH, pkReg, ccsReg)
 	if err != nil {
 		return nil, errors.New("registration proof generation failed: " + err.Error())
