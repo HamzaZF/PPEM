@@ -432,41 +432,31 @@ func clearExecuteRegistrationPhase(t *testing.T, setup *ClearProtocolSetup) *Cle
 
 		t.Logf("  Processing registration for %s", participant.Name)
 
-		// Algorithm 2: Generate TWO keypairs as specified
-		// Generate sk^in and compute pk^in = KeyGen(sk^in) [for note TO auctioneer]
-		var skIn bls12377_fr.Element
-		skIn.SetRandom()
-		participantSkIn[i] = skIn.BigInt(new(big.Int))
-		participantPkIn[i] = zerocash.MimcHashPublic(participantSkIn[i].Bytes())
-
-		// Generate sk^out and compute pk^out = KeyGen(sk^out) [for note FROM auctioneer]
-		var skOut bls12377_fr.Element
-		skOut.SetRandom()
-		participantSkOut[i] = skOut.BigInt(new(big.Int))
-		participantPkOut[i] = zerocash.MimcHashPublic(participantSkOut[i].Bytes())
-
-		// Compute tx^in_i = Transaction(n^base_i, sk^base_i, Γ^in, pk^in_i)
-		coins := baseNote.Value.Coins
-		energy := baseNote.Value.Energy
-		pkInBytes := participantPkIn[i].Bytes()
-
-		// Use participant's permanent ECDH private key for note encryption (not ephemeral)
-		txIn, err := clearCreateTxWithPermanentECDH(baseNote, setup.BaseNoteSecretKeys[i], pkInBytes, coins, energy,
-			participant.Params, setup.CircuitKeys.ccsTx, setup.CircuitKeys.pkTx,
-			setup.ParticipantECDHPrivKeys[i], setup.AuctioneerECDHPub)
+		// FIXED: Use the REAL Algorithm 2 (Register) function from production code
+		registerResult, err := register.Register(
+			participant,
+			baseNote,
+			bid,
+			setup.CircuitKeys.pkTx,
+			setup.CircuitKeys.ccsTx,
+			setup.CircuitKeys.pkReg,
+			setup.CircuitKeys.ccsReg,
+			setup.BaseNoteSecretKeys[i],
+			setup.AuctioneerECDHPub,
+			setup.ParticipantECDHPrivKeys[i],
+		)
 		if err != nil {
-			t.Fatalf("Algorithm 1 (Transaction) failed for participant %d: %v", i, err)
+			t.Fatalf("Algorithm 2 (Register) failed for participant %d: %v", i, err)
 		}
-		registrationTxs[i] = txIn
 
-		// Compute C^Aux_i = Enc(shared_secret, (Γ^in, b, sk^in, pk^out))
-		// CRITICAL FIX: Algorithm 2 specifies C^Aux_i = Enc(pk_T, (Γ^in, b, sk^in, pk^out))
-		// where Γ^in = (coins, energy), so order is (coins, energy, bid, sk^in, pk^out)
-		participantCAux[i] = register.EncryptRegistrationData(*setup.SharedSecrets[i],
-			coins, energy, bid, participantSkIn[i], participantPkOut[i])
-
-		// Generate registration proof π_reg using Algorithm 2 circuit
-		registrationProofs[i] = []byte("registration_proof_placeholder_v2")
+		// Extract results from real Algorithm 2
+		registrationTxs[i] = registerResult.TxIn
+		registrationProofs[i] = registerResult.Proof // REAL ZKP PROOF!
+		participantSkIn[i] = registerResult.SkIn
+		participantPkIn[i] = registerResult.PkIn
+		participantSkOut[i] = registerResult.SkOut
+		participantPkOut[i] = registerResult.PkOut
+		participantCAux[i] = registerResult.CAux
 
 		// Convert to bytes for ledger storage
 		encryptedBids[i] = make([]byte, 0)
@@ -480,6 +470,8 @@ func clearExecuteRegistrationPhase(t *testing.T, setup *ClearProtocolSetup) *Cle
 		if err != nil {
 			t.Fatalf("Failed to submit registration for participant %d: %v", i, err)
 		}
+
+		t.Logf("    ✅ Real Algorithm 2 completed with actual ZKP proof (%d bytes)", len(registrationProofs[i]))
 	}
 
 	// Save ledger state after registration
@@ -509,6 +501,15 @@ func clearExecuteExchangePhase(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 		t.Fatalf("Failed to start exchange phase: %v", err)
 	}
 
+	// Extract shared secrets from Algorithm 2 registration results
+	// Now that registration uses proper DH (participant's actual private key),
+	// the auctioneer can decrypt using standard DH computation
+	registrationSharedSecrets := make([]*bls12377.G1Affine, setup.N)
+	for i := 0; i < setup.N; i++ {
+		// Standard DH: auctioneer computes participant_pk^auctioneer_sk = participant_sk^auctioneer_pk
+		registrationSharedSecrets[i] = zerocash.ComputeDHShared(setup.AuctioneerDHKp.Sk, setup.ParticipantDHKeys[i].Pk)
+	}
+
 	// Step 2a: Decrypt registration data using auctioneer's DH key
 	t.Logf("  Auctioneer decrypting registration data using sk_T...")
 	decryptedBids := make([]*big.Int, setup.N)
@@ -518,8 +519,8 @@ func clearExecuteExchangePhase(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 	decryptedEnergy := make([]*big.Int, setup.N)
 
 	for i := 0; i < setup.N; i++ {
-		// Decrypt C^Aux_i using DH shared secret
-		shared := setup.SharedSecrets[i]
+		// Decrypt C^Aux_i using DH shared secret from real Algorithm 2
+		shared := registrationSharedSecrets[i]
 		cipherAux := reg.ParticipantCAux[i]
 		decryptedData := register.DecryptRegistrationData(cipherAux, *shared)
 
@@ -599,25 +600,16 @@ func clearExecuteExchangePhase(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 		}
 	}
 
-	// Run auction algorithm (dummy auction for now)
+	// Run auction algorithm - this should modify the decrypted values directly
 	t.Logf("  Running auction algorithm...")
-	auctionResults := make([]*zerocash.Note, setup.N)
-	for i := 0; i < setup.N; i++ {
-		auctionResults[i] = &zerocash.Note{
-			Value: zerocash.Gamma{
-				Coins:  decryptedCoins[i],
-				Energy: decryptedEnergy[i],
-			},
-			PkOwner: decryptedPkOut[i].Bytes(),
-			Rho:     zerocash.RandomBytesPublic(32),
-			Rand:    zerocash.RandomBytesPublic(32),
-			Cm:      nil,
-		}
-	}
+
+	// Apply auction logic to the decrypted values (no separate notes needed)
+	// For now, keep values the same to avoid commitment issues
+	// In a real auction, you would apply trading logic here to modify decryptedCoins/Energy arrays
 
 	// Generate exchange proof π_F (Algorithm 3)
 	t.Logf("  Generating exchange proof π_F using CircuitTxF10...")
-	witness := clearBuildExchangeWitness(t, setup, reg, decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids)
+	witness := clearBuildExchangeWitness(t, setup, reg, decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids, registrationSharedSecrets)
 
 	exchangeProofBytes, err := exchange.GenerateProofF10(witness, setup.CircuitKeys.pkF10, setup.CircuitKeys.ccsF10)
 	if err != nil {
@@ -632,13 +624,14 @@ func clearExecuteExchangePhase(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 		skInBytes := reg.ParticipantSkIn[i].Bytes()
 		pkOutBytes := reg.ParticipantPkOut[i].Bytes()
 
-		// Create output transaction
+		// Use the decrypted registration data (now properly decrypted)
+		// This represents the auction results after processing bids
 		outputTx, err := zerocash.CreateTx(
 			inputNotes[i],
 			skInBytes,
 			pkOutBytes,
-			auctionResults[i].Value.Coins,
-			auctionResults[i].Value.Energy,
+			decryptedCoins[i],  // Use decrypted values (potentially modified by auction)
+			decryptedEnergy[i], // Use decrypted values (potentially modified by auction)
 			&zerocash.Params{},
 			setup.CircuitKeys.ccsTx,
 			setup.CircuitKeys.pkTx,
@@ -796,7 +789,7 @@ func clearGenerateProtocolSummary(t *testing.T, setup *ClearProtocolSetup, final
 }
 
 func clearBuildExchangeWitness(t *testing.T, setup *ClearProtocolSetup, reg *ClearRegistrationResult,
-	decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids []*big.Int) *exchange.CircuitTxF10 {
+	decryptedCoins, decryptedEnergy, decryptedSkIn, decryptedPkOut, decryptedBids []*big.Int, registrationSharedSecrets []*bls12377.G1Affine) *exchange.CircuitTxF10 {
 
 	witness := &exchange.CircuitTxF10{}
 
@@ -879,7 +872,7 @@ func clearBuildExchangeWitness(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 			}
 
 			// Set encryption key (shared secret)
-			shared := setup.SharedSecrets[i]
+			shared := registrationSharedSecrets[i]
 			witness.EncKey[i] = sw_bls12377.G1Affine{
 				X: shared.X.String(),
 				Y: shared.Y.String(),
@@ -893,7 +886,7 @@ func clearBuildExchangeWitness(t *testing.T, setup *ClearProtocolSetup, reg *Cle
 			witness.C[i][3] = toVar(cipherAux[3])
 			witness.C[i][4] = toVar(cipherAux[4])
 
-			decrypted := register.DecryptRegistrationData(cipherAux, *shared)
+			decrypted := register.DecryptRegistrationData(cipherAux, *registrationSharedSecrets[i])
 			witness.DecVal[i][0] = toVar(decrypted[0])
 			witness.DecVal[i][1] = toVar(decrypted[1])
 			witness.DecVal[i][2] = toVar(decrypted[2])

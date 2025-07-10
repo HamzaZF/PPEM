@@ -81,12 +81,11 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	// Step 5: info_bid computation omitted (not used)
 	infoBid := []byte("not used") // Placeholder
 
-	// Step 6: Generate DH randomness and compute shared key for circuit protocol
-	// Circuit expects: EncKey = G_b^R where G_b is auctioneer public key
-	var rDH bls12377_fr.Element
-	rDH.SetRandom()
+	// Step 6: Use participant's DH private key for proper DH protocol
+	// Circuit expects: EncKey = G_b^R where R is participant's DH private key
+	rDH := *participant.Sk // Use participant's actual DH private key, not random
 
-	// Compute shared key as auctioneer_pk^R (to match circuit constraint)
+	// Compute shared key as auctioneer_pk^participant_sk (proper DH)
 	var sharedKey bls12377.G1Affine
 	sharedKey.ScalarMultiplication(participant.AuctioneerPub, rDH.BigInt(new(big.Int)))
 
