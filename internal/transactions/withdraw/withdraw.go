@@ -26,7 +26,7 @@ type WithdrawTx struct {
 	SnIn      *big.Int
 	CmOut     *big.Int
 	PkT       sw_bls12377.G1Affine
-	CipherAux [3]*big.Int
+	CipherAux [5]*big.Int // Same 5-value format as registration
 }
 
 // PRFGo implements the serial number PRF using MiMC (Go version)
@@ -38,17 +38,18 @@ func PRFGo(sk, rho *big.Int) *big.Int {
 }
 
 // BuildWithdrawWitness constructs the witness for CircuitWithdraw
-func BuildWithdrawWitness(nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int, bid *big.Int) *CircuitWithdraw {
+func BuildWithdrawWitness(nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [5]*big.Int, bid *big.Int, sharedSecret sw_bls12377.G1Affine) *CircuitWithdraw {
 	w := &CircuitWithdraw{}
 
 	w.SnIn = PRFGo(skIn, nIn.Rho).String()
 	w.CmOut = nOut.Cm.String()
 	w.PkT = pkT
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 5; i++ {
 		w.CipherAux[i] = cipherAux[i].String()
 	}
 	w.SkIn = skIn.String()
-	w.Bid = bid.String() // bid value is required for Algorithm 4
+	w.Bid = bid.String()          // bid value is required for Algorithm 4
+	w.SharedSecret = sharedSecret // DH shared secret from registration
 	w.NIn.Coins = nIn.Coins.String()
 	w.NIn.Energy = nIn.Energy.String()
 	w.NIn.PkIn = nIn.Pk.String()
@@ -66,7 +67,7 @@ func BuildWithdrawWitness(nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1
 
 // Withdraw runs the withdrawal protocol, returns tx and proof
 func Withdraw(
-	nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [3]*big.Int, bid *big.Int,
+	nIn Note, skIn *big.Int, nOut Note, pkT sw_bls12377.G1Affine, cipherAux [5]*big.Int, bid *big.Int, sharedSecret sw_bls12377.G1Affine,
 	pk groth16.ProvingKey, ccs constraint.ConstraintSystem,
 ) (*WithdrawTx, []byte, error) {
 	if skIn == nil {
@@ -79,7 +80,7 @@ func Withdraw(
 		return nil, nil, fmt.Errorf("nOut.Cm is nil")
 	}
 
-	witness := BuildWithdrawWitness(nIn, skIn, nOut, pkT, cipherAux, bid)
+	witness := BuildWithdrawWitness(nIn, skIn, nOut, pkT, cipherAux, bid, sharedSecret)
 	if witness == nil {
 		return nil, nil, fmt.Errorf("witness is nil")
 	}
@@ -120,10 +121,12 @@ func VerifyWithdraw(tx *WithdrawTx, proofBytes []byte, vk groth16.VerifyingKey) 
 		SnIn:  tx.SnIn.String(),
 		CmOut: tx.CmOut.String(),
 		PkT:   tx.PkT,
-		CipherAux: [3]frontend.Variable{
+		CipherAux: [5]frontend.Variable{
 			tx.CipherAux[0].String(),
 			tx.CipherAux[1].String(),
 			tx.CipherAux[2].String(),
+			tx.CipherAux[3].String(),
+			tx.CipherAux[4].String(),
 		},
 	}
 

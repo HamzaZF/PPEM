@@ -331,7 +331,7 @@ func executeExchangePhase(state *ProtocolState) error {
 				X: state.ParticipantDHKeys[i].Pk.X.String(),
 				Y: state.ParticipantDHKeys[i].Pk.Y.String(),
 			},
-			TxNoteData: []byte{}, // Note data handled separately
+			TxNoteData: state.RegistrationTxs[i].CNew, // Use encrypted note data from Algorithm 1
 		}
 		participantECDHPubKeys[i] = state.ParticipantECDHKeys[i].PublicKey()
 	}
@@ -345,7 +345,7 @@ func executeExchangePhase(state *ProtocolState) error {
 	// Step 4: Execute Algorithm 3 with proper cryptographic parameters
 	fmt.Println("   → Step 4: Generating exchange proof π_F using CircuitTxF10")
 
-	_, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
+	exchangeTx, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
 		exchangePayloads,
 		state.AuctioneerDHKp.Sk.BigInt(new(big.Int)),
 		state.AuctioneerECDHPriv,
@@ -363,14 +363,36 @@ func executeExchangePhase(state *ProtocolState) error {
 
 	state.ExchangeProof = exchangeProof
 
+	// Step 5: Create individual output transactions from exchange results
+	fmt.Println("   → Step 5: Creating individual output transactions for participants")
+
+	outputTxs := make([]*zerocash.Tx, 0)
+	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
+		for i, output := range exchangeResult.Outputs {
+			if i < len(state.RegistrationTxs) && output.Coins != nil && output.Energy != nil {
+				// Create output transaction using input serial number and new commitment
+				outputTx := &zerocash.Tx{
+					SnOld:     state.RegistrationTxs[i].SnOld, // Serial number from input note
+					CmNew:     fmt.Sprintf("output_cm_%d", i), // New commitment (simplified)
+					OldCoin:   state.RegistrationTxs[i].OldCoin,
+					OldEnergy: state.RegistrationTxs[i].OldEnergy,
+					NewCoin:   output.Coins.String(),
+					NewEnergy: output.Energy.String(),
+					Proof:     exchangeProof, // Same proof for all (batch verification)
+				}
+				outputTxs = append(outputTxs, outputTx)
+			}
+		}
+	}
+
 	// Transition ledger to exchange phase before submitting results
 	if err := state.Ledger.StartExchangePhase(); err != nil {
 		return fmt.Errorf("failed to start exchange phase: %w", err)
 	}
 
-	// Submit exchange results to ledger
+	// Submit exchange results to ledger with individual output transactions
 	auctionInfo := []byte(`{"auction_type":"sealed_bid_double_auction","participants":10}`)
-	err = state.Ledger.SubmitExchange([]*zerocash.Tx{}, state.ExchangeProof, auctionInfo)
+	err = state.Ledger.SubmitExchange(outputTxs, state.ExchangeProof, auctionInfo)
 	if err != nil {
 		return fmt.Errorf("failed to submit exchange results: %w", err)
 	}
@@ -424,30 +446,31 @@ func executeWithdrawalDemo(state *ProtocolState) {
 		// ALGORITHM 4 IMPLEMENTATION (Following paper specification)
 		// ═══════════════════════════════════════════════════════════════
 
-		// Algorithm 4 uses the EXACT note that was sent to the auctioneer during Algorithm 2
+		// Algorithm 4 uses the EXACT note that was created by Algorithm 1 during registration
 		// and the sk^in key that was generated during Algorithm 2
-		fmt.Println("   → Using note sent to auctioneer during registration (Algorithm 2)")
-		fmt.Println("   → Using sk^in key generated during registration (Algorithm 2)")
+		fmt.Println("   → Using note n^in created by Algorithm 1 during registration")
+		fmt.Println("   → Using sk^in key generated during Algorithm 2")
 
-		noteToWithdraw := state.BaseNotes[i] // The note sent during registration
-		skIn := state.ParticipantSkIn[i]     // The sk^in from Algorithm 2
-		pkIn := state.ParticipantPkIn[i]     // The pk^in from Algorithm 2
+		// CRITICAL FIX: Use the note created by Algorithm 1, not the original base note
+		registrationTx := state.RegistrationTxs[i] // tx^in from Algorithm 1
+		noteToWithdraw := registrationTx.NewNote   // n^in: The actual note sent to auctioneer
+		skIn := state.ParticipantSkIn[i]           // sk^in from Algorithm 2
 
 		// Create withdrawal note data structures
 		inNote := withdraw.Note{
 			Coins:  noteToWithdraw.Value.Coins,
 			Energy: noteToWithdraw.Value.Energy,
 			Pk:     new(big.Int).SetBytes(noteToWithdraw.PkOwner),
-			Rho:    new(big.Int).SetBytes(noteToWithdraw.Rho),
-			R:      new(big.Int).SetBytes(noteToWithdraw.Rand),
-			Cm:     new(big.Int).SetBytes(noteToWithdraw.Cm),
+			Rho:    new(big.Int).SetBytes(noteToWithdraw.Rho),  // n^in.rho (correct!)
+			R:      new(big.Int).SetBytes(noteToWithdraw.Rand), // n^in.r (correct!)
+			Cm:     new(big.Int).SetBytes(noteToWithdraw.Cm),   // n^in.cm (correct!)
 		}
 
 		// Create output note (participant gets their funds back)
 		outNote := withdraw.Note{
-			Coins:  new(big.Int).Set(noteToWithdraw.Value.Coins),
-			Energy: new(big.Int).Set(noteToWithdraw.Value.Energy),
-			Pk:     pkIn, // Use pk^in from registration
+			Coins:  new(big.Int).Set(noteToWithdraw.Value.Coins),  // Same coins from n^in
+			Energy: new(big.Int).Set(noteToWithdraw.Value.Energy), // Same energy from n^in
+			Pk:     state.ParticipantPkOut[i],                     // pk^out from registration
 			Rho:    new(big.Int).SetBytes(zerocash.RandomBytesPublic(32)),
 			R:      new(big.Int).SetBytes(zerocash.RandomBytesPublic(32)),
 		}
@@ -461,17 +484,25 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			Y: state.AuctioneerDHKp.Pk.Y.String(),
 		}
 
-		// Create registration ciphertext (this would normally come from Algorithm 2)
-		cipherAux := [3]*big.Int{
-			state.Bids[i],             // bid
-			skIn,                      // sk^in
-			state.ParticipantPkOut[i], // pk^out
+		// Use the EXACT same ciphertext from Algorithm 2 registration
+		// The CAux from registration contains: [pkOut, skIn, bid, coins, energy]
+		// Withdrawal uses the SAME 5-value format as registration
+		cipherAux := [5]*big.Int{
+			state.ParticipantCAux[i][0], // pkOut (encrypted)
+			state.ParticipantCAux[i][1], // skIn (encrypted)
+			state.ParticipantCAux[i][2], // bid (encrypted)
+			state.ParticipantCAux[i][3], // coins (encrypted)
+			state.ParticipantCAux[i][4], // energy (encrypted)
 		}
 
 		fmt.Println("   → Step 1: Computing withdrawal transaction")
 		fmt.Println("   → Step 2: Generating withdrawal proof π_draw")
 
 		// Execute Algorithm 4: Withdraw
+		sharedSecretGnark := sw_bls12377.G1Affine{
+			X: state.SharedSecrets[i].X.String(),
+			Y: state.SharedSecrets[i].Y.String(),
+		}
 		withdrawTx, withdrawProof, err := withdraw.Withdraw(
 			inNote,
 			skIn,
@@ -479,6 +510,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			pkT,
 			cipherAux,
 			state.Bids[i],
+			sharedSecretGnark, // DH shared secret from registration
 			withdrawalKeys.pkWithdraw,
 			withdrawalKeys.ccsWithdraw,
 		)

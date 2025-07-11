@@ -2708,14 +2708,14 @@ func TestFullProtocolFlowCorrectedCleared(t *testing.T) {
 		// PHASE 2: AUCTION/EXCHANGE
 		// =================================================================
 		t.Logf("\n🔄 PHASE 2: AUCTION/EXCHANGE")
-		exchangeResult := executeExchangePhase(t, setupResult, registrationResult)
+		exchangeResult := executeFinalizationPhaseTest(t, setupResult, registrationResult)
 		validateExchangePhase(t, setupResult, exchangeResult)
 
 		// =================================================================
 		// PHASE 3: FINALIZATION
 		// =================================================================
 		t.Logf("\n🔒 PHASE 3: FINALIZATION")
-		finalResult := executeFinalizationPhase(t, setupResult, exchangeResult)
+		finalResult := executeFinalizationPhaseTest(t, setupResult, exchangeResult)
 		validateFinalizationPhase(t, setupResult, finalResult)
 
 		// =================================================================
@@ -2960,8 +2960,8 @@ func executeRegistrationPhaseTest(t *testing.T, setup *ProtocolSetup) *Registrat
 	}
 }
 
-// executeExchangePhase implements "🔄 PHASE 2: AUCTION/EXCHANGE"
-func executeExchangePhase(t *testing.T, setup *ProtocolSetup, reg *RegistrationResult) *ExchangeResult {
+// executeFinalizationPhaseTestTest implements "🔄 PHASE 2: AUCTION/EXCHANGE"
+func executeFinalizationPhaseTest(t *testing.T, setup *ProtocolSetup, reg *RegistrationResult) *ExchangeResult {
 	t.Logf("Step 2a: Auctioneer Processes Auction (Algorithm 3)")
 
 	// Start exchange phase
@@ -3233,8 +3233,8 @@ func executeExchangePhase(t *testing.T, setup *ProtocolSetup, reg *RegistrationR
 	}
 }
 
-// executeFinalizationPhase implements "🔄 PHASE 3: FINALIZATION"
-func executeFinalizationPhase(t *testing.T, setup *ProtocolSetup, exchange *ExchangeResult) *FinalizationResult {
+// executeFinalizationPhaseTest implements "🔄 PHASE 3: FINALIZATION"
+func executeFinalizationPhaseTest(t *testing.T, setup *ProtocolSetup, exchange *ExchangeResult) *FinalizationResult {
 	t.Logf("Step 3a: Merge Temporary Lists")
 
 	// Close auction (merge temporary to permanent lists)

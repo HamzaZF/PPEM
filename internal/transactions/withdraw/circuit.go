@@ -11,11 +11,14 @@ type CircuitWithdraw struct {
 	SnIn      frontend.Variable    `gnark:",public"`
 	CmOut     frontend.Variable    `gnark:",public"`
 	PkT       sw_bls12377.G1Affine `gnark:",public"`
-	CipherAux [3]frontend.Variable `gnark:",public"` // C_i = (b_i, sk_i^in, pk_i^out)
+	CipherAux [5]frontend.Variable `gnark:",public"` // C_i = (pk^out, sk^in, bid, coins, energy) - same as registration
 
 	// Private (Witness: w = (n_i^in, n_i^out, sk_i^in, b_i))
 	SkIn frontend.Variable // sk_i^in
 	Bid  frontend.Variable // b_i (bid value)
+
+	// Shared secret (computed during registration, not recomputed here)
+	SharedSecret sw_bls12377.G1Affine // sharedKey from registration DH computation
 
 	// Input note n_i^in = (Γ^in, pk^in, ρ^in, r^in, cm^in)
 	NIn struct {
@@ -55,9 +58,9 @@ func (c *CircuitWithdraw) Define(api frontend.API) error {
 	cmComputed := hasher.Sum()
 	api.AssertIsEqual(c.CmOut, cmComputed)
 
-	// (3) Ciphertext: C_i = DH-OTP(pk_T, (b_i, sk_i^in, pk_i^out))
-	encVal := EncWithdrawMimc(api, c.Bid, c.SkIn, c.NOut.PkOut, c.PkT)
-	for i := 0; i < 3; i++ {
+	// (3) Ciphertext: C_i = DH-OTP(sharedSecret, (pk^out, sk^in, bid, coins, energy)) - same as registration!
+	encVal := EncWithdrawMimc(api, c.Bid, c.SkIn, c.NOut.PkOut, c.NOut.Coins, c.NOut.Energy, c.SharedSecret)
+	for i := 0; i < 5; i++ {
 		api.AssertIsEqual(c.CipherAux[i], encVal[i])
 	}
 
@@ -74,25 +77,37 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 
 // EncWithdrawMimc for ciphertext (MiMC-based DH-OTP encryption)
 // Encrypts (b_i, sk_i^in, pk_i^out) using DH shared secret (NO r_enc needed)
-func EncWithdrawMimc(api frontend.API, bid, skIn, pkOut frontend.Variable, pkT sw_bls12377.G1Affine) [3]frontend.Variable {
+func EncWithdrawMimc(api frontend.API, bid, skIn, pkOut, coins, energy frontend.Variable, sharedSecret sw_bls12377.G1Affine) [5]frontend.Variable {
 	h, _ := mimc.NewMiMC(api)
 
-	// Generate encryption masks using MiMC hash chain with DH shared secret
-	h.Write(pkT.X)
-	h.Write(pkT.Y)
+	// Generate encryption masks using MiMC hash chain with DH shared secret (SAME as registration)
+	h.Write(sharedSecret.X)
+	h.Write(sharedSecret.Y)
 	mask1 := h.Sum()
 
+	h.Reset() // Reset hash before next computation
 	h.Write(mask1)
 	mask2 := h.Sum()
 
+	h.Reset() // Reset hash before next computation
 	h.Write(mask2)
 	mask3 := h.Sum()
 
-	// Perform DH-OTP encryption: ciphertext = plaintext + mask
-	// C_i = DH-OTP(pk_T, (b_i, sk_i^in, pk_i^out)) - no r_enc needed!
-	bid_enc := api.Add(bid, mask1)     // b_i
-	skIn_enc := api.Add(skIn, mask2)   // sk_i^in
-	pkOut_enc := api.Add(pkOut, mask3) // pk_i^out
+	h.Reset() // Reset hash before next computation
+	h.Write(mask3)
+	mask4 := h.Sum()
 
-	return [3]frontend.Variable{bid_enc, skIn_enc, pkOut_enc}
+	h.Reset() // Reset hash before next computation
+	h.Write(mask4)
+	mask5 := h.Sum()
+
+	// Perform DH-OTP encryption: ciphertext = plaintext + mask
+	// SAME encryption as registration: [pkOut, skIn, bid, coins, energy] -> [mask1, mask2, mask3, mask4, mask5]
+	pkOut_enc := api.Add(pkOut, mask1)   // pkOut encrypted with mask1 (index 0)
+	skIn_enc := api.Add(skIn, mask2)     // skIn encrypted with mask2 (index 1)
+	bid_enc := api.Add(bid, mask3)       // bid encrypted with mask3 (index 2)
+	coins_enc := api.Add(coins, mask4)   // coins encrypted with mask4 (index 3)
+	energy_enc := api.Add(energy, mask5) // energy encrypted with mask5 (index 4)
+
+	return [5]frontend.Variable{pkOut_enc, skIn_enc, bid_enc, coins_enc, energy_enc}
 }
