@@ -23,29 +23,144 @@ import (
 	"implementation/internal/zerocash"
 )
 
-// Protocol configuration
-const N = 10 // Number of participants as specified in the paper
+// MarketConfig defines all configurable market parameters
+type MarketConfig struct {
+	// Basic market parameters
+	NumParticipants int    `json:"num_participants"`
+	AuctionType     string `json:"auction_type"`
 
-// ENERGY MARKET PARTICIPANT ROLES (HARDCODED FOR CLARITY)
-// This clarifies what each participant's "bid" means without changing the protocol
-var ParticipantRoles = map[int]zerocash.OrderType{
-	// BUYERS: "bid" = maximum price they're willing to PAY per unit of energy
-	0: zerocash.BUY, // Participant_01: wants to BUY energy, bid=20 = max 20 coins/unit
-	1: zerocash.BUY, // Participant_02: wants to BUY energy, bid=25 = max 25 coins/unit
-	2: zerocash.BUY, // Participant_03: wants to BUY energy, bid=30 = max 30 coins/unit
-	3: zerocash.BUY, // Participant_04: wants to BUY energy, bid=35 = max 35 coins/unit
-	4: zerocash.BUY, // Participant_05: wants to BUY energy, bid=40 = max 40 coins/unit
+	// Participant configuration
+	Roles         map[int]zerocash.OrderType `json:"roles"`
+	InitialCoins  []int64                    `json:"initial_coins"`
+	InitialEnergy []int64                    `json:"initial_energy"`
+	BidPrices     []int64                    `json:"bid_prices"`
 
-	// SELLERS: "bid" = minimum price they're willing to ACCEPT per unit of energy
-	5: zerocash.SELL, // Participant_06: wants to SELL energy, bid=45 = min 45 coins/unit
-	6: zerocash.SELL, // Participant_07: wants to SELL energy, bid=50 = min 50 coins/unit
-	7: zerocash.SELL, // Participant_08: wants to SELL energy, bid=55 = min 55 coins/unit
-	8: zerocash.SELL, // Participant_09: wants to SELL energy, bid=60 = min 60 coins/unit
-	9: zerocash.SELL, // Participant_10: wants to SELL energy, bid=65 = min 65 coins/unit
+	// Withdrawal scenario configuration
+	WithdrawalMode string `json:"withdrawal_mode"` // "none", "emergency", "selective"
+	WithdrawAll    bool   `json:"withdraw_all"`    // true = all participants withdraw
+	WithdrawList   []int  `json:"withdraw_list"`   // specific participants (for testing)
 }
+
+// createDefaultMarketConfig creates a balanced energy market scenario
+func createDefaultMarketConfig() MarketConfig {
+	return MarketConfig{
+		NumParticipants: 10,
+		AuctionType:     "sealed-bid-double-auction",
+
+		// Participant roles: first 5 are buyers, last 5 are sellers
+		Roles: map[int]zerocash.OrderType{
+			0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY,
+			5: zerocash.SELL, 6: zerocash.SELL, 7: zerocash.SELL, 8: zerocash.SELL, 9: zerocash.SELL,
+		},
+
+		// Initial balances: increasing coins and energy
+		InitialCoins:  []int64{1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900},
+		InitialEnergy: []int64{50, 60, 70, 80, 90, 100, 110, 120, 130, 140},
+
+		// Bid prices: buyers bid higher, sellers ask higher
+		BidPrices: []int64{20, 25, 30, 35, 40, 45, 50, 55, 60, 65},
+
+		// No withdrawal by default (normal market operation)
+		WithdrawalMode: "none",
+		WithdrawAll:    false,
+		WithdrawList:   []int{},
+	}
+}
+
+// createHighDemandScenario creates a scenario where buyers have much more coins (high demand)
+func createHighDemandScenario() MarketConfig {
+	config := createDefaultMarketConfig()
+
+	// Buyers have more coins (high purchasing power)
+	config.InitialCoins = []int64{2000, 2200, 2400, 2600, 2800, 1000, 1100, 1200, 1300, 1400}
+	// Buyers bid higher (desperate for energy)
+	config.BidPrices = []int64{50, 55, 60, 65, 70, 30, 35, 40, 45, 50}
+
+	return config
+}
+
+// createLowSupplyScenario creates a scenario where sellers have less energy (low supply)
+func createLowSupplyScenario() MarketConfig {
+	config := createDefaultMarketConfig()
+
+	// Sellers have less energy to sell
+	config.InitialEnergy = []int64{80, 90, 100, 110, 120, 30, 40, 50, 60, 70}
+	// Sellers ask higher prices (scarce supply)
+	config.BidPrices = []int64{20, 25, 30, 35, 40, 70, 75, 80, 85, 90}
+
+	return config
+}
+
+// createEmergencyScenario creates a scenario where the auctioneer fails (all participants withdraw)
+func createEmergencyScenario() MarketConfig {
+	config := createDefaultMarketConfig()
+
+	// Emergency: all participants need to withdraw
+	config.WithdrawalMode = "emergency"
+	config.WithdrawAll = true
+
+	return config
+}
+
+// createTestingScenario creates a scenario for selective withdrawal testing
+func createTestingScenario() MarketConfig {
+	config := createDefaultMarketConfig()
+
+	// Testing: only specific participants withdraw
+	config.WithdrawalMode = "selective"
+	config.WithdrawAll = false
+	config.WithdrawList = []int{0, 1, 2} // First 3 participants
+
+	return config
+}
+
+// validateConfig ensures the market configuration is valid
+func validateConfig(config MarketConfig) error {
+	if config.NumParticipants <= 0 {
+		return fmt.Errorf("number of participants must be positive")
+	}
+
+	if len(config.InitialCoins) != config.NumParticipants {
+		return fmt.Errorf("initial coins array length (%d) must match number of participants (%d)",
+			len(config.InitialCoins), config.NumParticipants)
+	}
+
+	if len(config.InitialEnergy) != config.NumParticipants {
+		return fmt.Errorf("initial energy array length (%d) must match number of participants (%d)",
+			len(config.InitialEnergy), config.NumParticipants)
+	}
+
+	if len(config.BidPrices) != config.NumParticipants {
+		return fmt.Errorf("bid prices array length (%d) must match number of participants (%d)",
+			len(config.BidPrices), config.NumParticipants)
+	}
+
+	if len(config.Roles) != config.NumParticipants {
+		return fmt.Errorf("roles map length (%d) must match number of participants (%d)",
+			len(config.Roles), config.NumParticipants)
+	}
+
+	// Validate withdrawal configuration
+	if config.WithdrawalMode == "selective" && len(config.WithdrawList) == 0 {
+		return fmt.Errorf("selective withdrawal mode requires non-empty withdraw list")
+	}
+
+	for _, id := range config.WithdrawList {
+		if id < 0 || id >= config.NumParticipants {
+			return fmt.Errorf("withdraw list contains invalid participant ID: %d", id)
+		}
+	}
+
+	return nil
+}
+
+// Protocol configuration - now using MarketConfig instead of hardcoded values
 
 // ProtocolState holds all the state needed for the PPEM protocol execution
 type ProtocolState struct {
+	// Market configuration
+	Config MarketConfig
+
 	// Cryptographic keys and parameters
 	AuctioneerDHKp      *zerocash.DHKeyPair
 	AuctioneerECDHPriv  *ecdh.PrivateKey
@@ -91,21 +206,35 @@ func main() {
 
 	startTime := time.Now()
 
-	// Initialize protocol state
+	// STEP 1: Configure market scenario
+	config := createDefaultMarketConfig()
+	// Uncomment to try different scenarios:
+	// config := createHighDemandScenario()
+	// config := createLowSupplyScenario()
+	// config := createEmergencyScenario()
+	// config := createTestingScenario()
+
+	// Validate configuration
+	if err := validateConfig(config); err != nil {
+		log.Fatalf("Invalid market configuration: %v", err)
+	}
+
+	// STEP 2: Initialize protocol state with configuration
 	state := &ProtocolState{
-		Participants:       make([]*zerocash.Participant, N),
-		BaseNotes:          make([]*zerocash.Note, N),
-		BaseNoteKeys:       make([][]byte, N),
-		Bids:               make([]*big.Int, N),
-		SharedSecrets:      make([]*bls12377.G1Affine, N),
-		ParticipantSkIn:    make([]*big.Int, N),
-		ParticipantPkIn:    make([]*big.Int, N),
-		ParticipantSkOut:   make([]*big.Int, N),
-		ParticipantPkOut:   make([]*big.Int, N),
-		ParticipantCAux:    make([][5]*big.Int, N),
-		RegistrationTxs:    make([]*zerocash.Tx, N),
-		RegistrationProofs: make([][]byte, N),
-		WithdrawalResults:  make([]bool, N),
+		Config:             config,
+		Participants:       make([]*zerocash.Participant, config.NumParticipants),
+		BaseNotes:          make([]*zerocash.Note, config.NumParticipants),
+		BaseNoteKeys:       make([][]byte, config.NumParticipants),
+		Bids:               make([]*big.Int, config.NumParticipants),
+		SharedSecrets:      make([]*bls12377.G1Affine, config.NumParticipants),
+		ParticipantSkIn:    make([]*big.Int, config.NumParticipants),
+		ParticipantPkIn:    make([]*big.Int, config.NumParticipants),
+		ParticipantSkOut:   make([]*big.Int, config.NumParticipants),
+		ParticipantPkOut:   make([]*big.Int, config.NumParticipants),
+		ParticipantCAux:    make([][5]*big.Int, config.NumParticipants),
+		RegistrationTxs:    make([]*zerocash.Tx, config.NumParticipants),
+		RegistrationProofs: make([][]byte, config.NumParticipants),
+		WithdrawalResults:  make([]bool, config.NumParticipants),
 	}
 
 	// PHASE 0: SETUP
@@ -173,10 +302,10 @@ func setupProtocol(state *ProtocolState) error {
 
 	// Step 3: Generate participant keys and initial balances
 	fmt.Println("   → Setting up participants...")
-	state.ParticipantDHKeys = make([]*zerocash.DHKeyPair, N)
-	state.ParticipantECDHKeys = make([]*ecdh.PrivateKey, N)
+	state.ParticipantDHKeys = make([]*zerocash.DHKeyPair, state.Config.NumParticipants)
+	state.ParticipantECDHKeys = make([]*ecdh.PrivateKey, state.Config.NumParticipants)
 
-	for i := 0; i < N; i++ {
+	for i := 0; i < state.Config.NumParticipants; i++ {
 		// Generate DH keypair for participant i
 		state.ParticipantDHKeys[i], err = zerocash.GenerateDHKeyPair()
 		if err != nil {
@@ -204,10 +333,10 @@ func setupProtocol(state *ProtocolState) error {
 			},
 		}
 
-		// Create initial energy market note n^base_i with realistic values
-		coins := big.NewInt(int64(1000 + i*100))    // 1000-1900 coins
-		energy := big.NewInt(int64(50 + i*10))      // 50-140 kWh
-		state.Bids[i] = big.NewInt(int64(20 + i*5)) // 20-65 bid price per unit
+		// Create initial energy market note using configuration
+		coins := big.NewInt(state.Config.InitialCoins[i])
+		energy := big.NewInt(state.Config.InitialEnergy[i])
+		state.Bids[i] = big.NewInt(state.Config.BidPrices[i])
 
 		// Generate secret key for the base note
 		state.BaseNoteKeys[i] = zerocash.RandomBytesPublic(32)
@@ -231,7 +360,7 @@ func setupProtocol(state *ProtocolState) error {
 		state.Ledger.CmList = append(state.Ledger.CmList, cmBase)
 	}
 
-	fmt.Printf("   ✅ Setup complete: %d participants ready\n", N)
+	fmt.Printf("   ✅ Setup complete: %d participants ready\n", state.Config.NumParticipants)
 	return nil
 }
 
@@ -246,8 +375,8 @@ func executeRegistrationPhase(state *ProtocolState) error {
 	}
 
 	// Execute registration for each participant
-	for i := 0; i < N; i++ {
-		role := ParticipantRoles[i]
+	for i := 0; i < state.Config.NumParticipants; i++ {
+		role := state.Config.Roles[i]
 		roleStr := role.String()
 		var bidMeaning string
 		if role == zerocash.BUY {
@@ -313,7 +442,8 @@ func executeRegistrationPhase(state *ProtocolState) error {
 		fmt.Println()
 	}
 
-	fmt.Printf("📊 Registration Summary: %d/%d participants successfully registered\n", N, N)
+	fmt.Printf("📊 Registration Summary: %d/%d participants successfully registered\n",
+		state.Config.NumParticipants, state.Config.NumParticipants)
 	return nil
 }
 
