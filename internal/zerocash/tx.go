@@ -169,7 +169,7 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 		R:       r.String(),
 		EncKey:  toGnarkPoint(encKey),
 	}
-	fmt.Printf("[DEBUG] About to create witness: %+v\n", witness)
+	// fmt.Printf("[DEBUG] About to create witness: %+v\n", witness)
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		return nil, fmt.Errorf("witness creation failed: %w", err)

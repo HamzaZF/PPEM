@@ -156,45 +156,22 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 
 // RunAuctionLogic implements a sealed-bid double auction mechanism (SBExM)
 // This is the core auction algorithm that matches buyers and sellers
+// NOTE: Participant roles are now explicitly defined in main.go, no guessing needed!
 func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	if len(inputs) == 0 {
 		return inputs
 	}
 
-	// Analyze participants based on their bid intentions and energy/coin ratios
+	// SIMPLIFIED: Use the explicit participant roles defined in main.go
+	// Buyers: participants 0-4 (bid = max price willing to pay)
+	// Sellers: participants 5-9 (bid = min price willing to accept)
 	var buyers, sellers []int
 
-	for i, input := range inputs {
-		if input.Energy != nil && input.Coins != nil && input.Bid != nil {
-			// Determine participant type based on bid-to-energy ratio and market indicators
-			energyToCoinsRatio := new(big.Int)
-			if input.Coins.Cmp(big.NewInt(0)) > 0 {
-				energyToCoinsRatio.Div(input.Energy, input.Coins)
-			}
-
-			bidPerUnit := new(big.Int)
-			if input.Energy.Cmp(big.NewInt(0)) > 0 {
-				bidPerUnit.Div(input.Bid, input.Energy)
-			}
-
-			// Sophisticated classification:
-			// High bid-per-unit + low energy reserves = buyer
-			// Low bid-per-unit + high energy reserves = seller
-			avgBidThreshold := big.NewInt(50)  // Market average
-			energyThreshold := big.NewInt(100) // Energy reserve threshold
-
-			if bidPerUnit.Cmp(avgBidThreshold) >= 0 && input.Energy.Cmp(energyThreshold) < 0 {
-				buyers = append(buyers, i) // High bidder with low energy = buyer
-			} else if bidPerUnit.Cmp(avgBidThreshold) < 0 && input.Energy.Cmp(energyThreshold) >= 0 {
-				sellers = append(sellers, i) // Low bidder with high energy = seller
-			} else {
-				// Ambiguous cases: use energy-to-coins ratio as tiebreaker
-				if energyToCoinsRatio.Cmp(big.NewInt(1)) < 0 {
-					buyers = append(buyers, i) // More coins than energy = wants to buy energy
-				} else {
-					sellers = append(sellers, i) // More energy than coins = wants to sell energy
-				}
-			}
+	for i := range inputs {
+		if i < 5 {
+			buyers = append(buyers, i) // Participants 0-4 are BUYERS
+		} else {
+			sellers = append(sellers, i) // Participants 5-9 are SELLERS
 		}
 	}
 

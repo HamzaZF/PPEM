@@ -26,6 +26,24 @@ import (
 // Protocol configuration
 const N = 10 // Number of participants as specified in the paper
 
+// ENERGY MARKET PARTICIPANT ROLES (HARDCODED FOR CLARITY)
+// This clarifies what each participant's "bid" means without changing the protocol
+var ParticipantRoles = map[int]zerocash.OrderType{
+	// BUYERS: "bid" = maximum price they're willing to PAY per unit of energy
+	0: zerocash.BUY, // Participant_01: wants to BUY energy, bid=20 = max 20 coins/unit
+	1: zerocash.BUY, // Participant_02: wants to BUY energy, bid=25 = max 25 coins/unit
+	2: zerocash.BUY, // Participant_03: wants to BUY energy, bid=30 = max 30 coins/unit
+	3: zerocash.BUY, // Participant_04: wants to BUY energy, bid=35 = max 35 coins/unit
+	4: zerocash.BUY, // Participant_05: wants to BUY energy, bid=40 = max 40 coins/unit
+
+	// SELLERS: "bid" = minimum price they're willing to ACCEPT per unit of energy
+	5: zerocash.SELL, // Participant_06: wants to SELL energy, bid=45 = min 45 coins/unit
+	6: zerocash.SELL, // Participant_07: wants to SELL energy, bid=50 = min 50 coins/unit
+	7: zerocash.SELL, // Participant_08: wants to SELL energy, bid=55 = min 55 coins/unit
+	8: zerocash.SELL, // Participant_09: wants to SELL energy, bid=60 = min 60 coins/unit
+	9: zerocash.SELL, // Participant_10: wants to SELL energy, bid=65 = min 65 coins/unit
+}
+
 // ProtocolState holds all the state needed for the PPEM protocol execution
 type ProtocolState struct {
 	// Cryptographic keys and parameters
@@ -67,8 +85,7 @@ type CircuitKeys struct {
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║        Privacy-Preserving Energy Market (PPEM) Protocol            ║")
-	fmt.Println("║                    Production Implementation                       ║")
+	fmt.Println("║          Privacy-Preserving Exchange Mechanism (PPEM)              ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
@@ -91,37 +108,37 @@ func main() {
 		WithdrawalResults:  make([]bool, N),
 	}
 
-	// PHASE 0: SETUP - Key Generation and Circuit Compilation
-	fmt.Println("📋 PHASE 0: PROTOCOL SETUP")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 0: SETUP
+	fmt.Println("📋 SETUP")
+	fmt.Println("▔▔▔▔▔▔▔")
 	if err := setupProtocol(state); err != nil {
 		log.Fatalf("Setup failed: %v", err)
 	}
 
-	// PHASE 1: REGISTRATION - Algorithm 2 Implementation
-	fmt.Println("\n📝 PHASE 1: REGISTRATION (Algorithm 2)")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 1: REGISTRATION
+	fmt.Println("\n📝 REGISTRATION")
+	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔")
 	if err := executeRegistrationPhase(state); err != nil {
-		log.Fatalf("Registration phase failed: %v", err)
+		log.Fatalf("Registration failed: %v", err)
 	}
 
-	// PHASE 2: EXCHANGE - Algorithm 3 Implementation
-	fmt.Println("\n🔄 PHASE 2: EXCHANGE (Algorithm 3)")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 2: EXCHANGE
+	fmt.Println("\n🔄 EXCHANGE")
+	fmt.Println("▔▔▔▔▔▔▔▔▔")
 	if err := executeExchangePhase(state); err != nil {
-		log.Fatalf("Exchange phase failed: %v", err)
+		log.Fatalf("Exchange failed: %v", err)
 	}
 
-	// PHASE 3: FINALIZATION - Ledger State Management
-	fmt.Println("\n🔒 PHASE 3: FINALIZATION")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 3: FINALIZATION
+	fmt.Println("\n🔒 FINALIZATION")
+	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔")
 	if err := executeFinalizationPhase(state); err != nil {
-		log.Fatalf("Finalization phase failed: %v", err)
+		log.Fatalf("Finalization failed: %v", err)
 	}
 
-	// OPTIONAL: WITHDRAWAL - Algorithm 4 Implementation (Emergency Scenarios)
-	fmt.Println("\n🚨 PHASE 4: EMERGENCY WITHDRAWAL (Algorithm 4)")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 4: WITHDRAWAL (DEMO)
+	fmt.Println("\n🚨 WITHDRAWAL DEMO")
+	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
 	executeWithdrawalDemo(state)
 
 	// PROTOCOL SUMMARY
@@ -131,31 +148,31 @@ func main() {
 
 // setupProtocol implements the initial setup phase including key generation and circuit compilation
 func setupProtocol(state *ProtocolState) error {
-	fmt.Println("🔑 Generating cryptographic keys and compiling ZK circuits...")
+	fmt.Println("🔑 Initializing system...")
 
-	// Step 1: Compile all ZK circuits needed for the protocol
-	fmt.Println("   → Compiling ZK circuits for all 4 algorithms...")
+	// Step 1: Compile ZK circuits
+	fmt.Println("   → Compiling circuits...")
 	var err error
 	state.CircuitKeys, err = setupCircuitKeys()
 	if err != nil {
 		return fmt.Errorf("circuit setup failed: %w", err)
 	}
 
-	// Step 2: Generate auctioneer's keypairs (both DH and ECDH)
-	fmt.Println("   → Generating auctioneer keypairs (DH + ECDH)...")
+	// Step 2: Generate auctioneer keys
+	fmt.Println("   → Generating auctioneer keys...")
 	state.AuctioneerDHKp, err = zerocash.GenerateDHKeyPair()
 	if err != nil {
-		return fmt.Errorf("auctioneer DH key generation failed: %w", err)
+		return fmt.Errorf("auctioneer key generation failed: %w", err)
 	}
 
 	state.AuctioneerECDHPriv, err = ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
-		return fmt.Errorf("auctioneer ECDH key generation failed: %w", err)
+		return fmt.Errorf("auctioneer key generation failed: %w", err)
 	}
 	state.AuctioneerECDHPub = state.AuctioneerECDHPriv.PublicKey()
 
-	// Step 3: Generate participant keypairs and initial notes
-	fmt.Println("   → Generating participant keypairs and initial energy/coin notes...")
+	// Step 3: Generate participant keys and initial balances
+	fmt.Println("   → Setting up participants...")
 	state.ParticipantDHKeys = make([]*zerocash.DHKeyPair, N)
 	state.ParticipantECDHKeys = make([]*ecdh.PrivateKey, N)
 
@@ -214,13 +231,13 @@ func setupProtocol(state *ProtocolState) error {
 		state.Ledger.CmList = append(state.Ledger.CmList, cmBase)
 	}
 
-	fmt.Printf("   ✅ Setup complete: %d participants, auctioneer, and ledger initialized\n", N)
+	fmt.Printf("   ✅ Setup complete: %d participants ready\n", N)
 	return nil
 }
 
-// executeRegistrationPhase implements Algorithm 2 from the paper
+// executeRegistrationPhase handles participant registration
 func executeRegistrationPhase(state *ProtocolState) error {
-	fmt.Println("🎯 Algorithm 2: Register(n^base, Γ^in, b) → (C^Aux, tx^in, info_bid, π_reg)")
+	fmt.Println("📝 Registering participants...")
 	fmt.Println()
 
 	// Start registration phase on the ledger
@@ -228,26 +245,23 @@ func executeRegistrationPhase(state *ProtocolState) error {
 		return fmt.Errorf("failed to start registration phase: %w", err)
 	}
 
-	// Execute Algorithm 2 for each participant
+	// Execute registration for each participant
 	for i := 0; i < N; i++ {
-		fmt.Printf("👤 Participant_%02d Registration:\n", i+1)
+		role := ParticipantRoles[i]
+		roleStr := role.String()
+		var bidMeaning string
+		if role == zerocash.BUY {
+			bidMeaning = fmt.Sprintf("max willing to pay %s coins/unit", state.Bids[i].String())
+		} else {
+			bidMeaning = fmt.Sprintf("min willing to accept %s coins/unit", state.Bids[i].String())
+		}
 
-		// ═══════════════════════════════════════════════════════════════
-		// ALGORITHM 2 IMPLEMENTATION (Following paper specification)
-		// ═══════════════════════════════════════════════════════════════
+		fmt.Printf("👤 Participant_%02d Registration (%s ORDER):\n", i+1, roleStr)
 
-		// Step 1: Generate sk^in, Compute pk^in = KeyGen(sk^in)
-		// Step 2: Generate sk^out, Compute pk^out = KeyGen(sk^out)
-		// Step 3: Compute tx^in = Transaction(n^base, sk^base, Γ^in, pk^in)
-		// Step 4: Parse tx^in as (sn^base, (cm^in, c^in), π)
-		// Step 5: Sample r_Enc, Store r_Enc
-		// Step 6: Compute info_bid = Leak(Γ^in, b)
-		// Step 7: Compute C^Aux = Enc_r_Enc(pk_T, (Γ^in, b, sk^in, pk^out))
-		// Step 8: Compute Prove(x, w) → π_reg
-		fmt.Println("   → Step 1-2: Generating two keypairs (sk^in,pk^in) and (sk^out,pk^out)")
-		fmt.Println("   → Step 3: Creating transaction tx^in = Transaction(n^base, sk^base, Γ^in, pk^in)")
-		fmt.Println("   → Step 7: Computing DH-OTP encryption C^Aux = Enc(pk_T, data)")
-		fmt.Println("   → Step 8: Generating ZK proof π_reg")
+		fmt.Println("   → Generating keypairs...")
+		fmt.Println("   → Creating transaction...")
+		fmt.Println("   → Encrypting bid data...")
+		fmt.Println("   → Generating proof...")
 
 		registerResult, err := register.Register(
 			state.Participants[i],
@@ -291,10 +305,11 @@ func executeRegistrationPhase(state *ProtocolState) error {
 		}
 
 		fmt.Printf("   ✅ Registration successful: ZK proof (%d bytes), encrypted bid data\n", len(state.RegistrationProofs[i]))
-		fmt.Printf("      💰 Initial: %s coins, %s energy, bid: %s\n",
+		fmt.Printf("      💰 Initial: %s coins, %s energy, %s order: %s\n",
 			state.BaseNotes[i].Value.Coins.String(),
 			state.BaseNotes[i].Value.Energy.String(),
-			state.Bids[i].String())
+			roleStr,
+			bidMeaning)
 		fmt.Println()
 	}
 
@@ -302,25 +317,17 @@ func executeRegistrationPhase(state *ProtocolState) error {
 	return nil
 }
 
-// executeExchangePhase implements Algorithm 3 from the paper
+// executeExchangePhase handles the energy market auction
 func executeExchangePhase(state *ProtocolState) error {
-	fmt.Println("🎯 Algorithm 3: Exchange_F([C_i^in]_{i=1}^n, [C_i^Aux,in]_{i=1}^n, sk_T) → (tx^out, info, π_F)")
+	fmt.Println("🔄 Running energy market auction...")
 	fmt.Println()
 
-	// ═══════════════════════════════════════════════════════════════
-	// ALGORITHM 3 IMPLEMENTATION (Following paper specification)
-	// ═══════════════════════════════════════════════════════════════
+	fmt.Println("   → Decrypting registration data...")
+	fmt.Println("   → Matching buyers and sellers...")
+	fmt.Println("   → Computing auction results...")
+	fmt.Println("   → Generating exchange proof...")
 
-	// Step 1: Compute [Dec(sk_T, C_i^Aux)]_{i=1}^n = [(Γ_i^in, b_i, sk_i^in, pk_i^out)]_{i=1}^n
-	fmt.Println("   → Step 1: Auctioneer decrypts registration data using sk_T")
-
-	// Step 2: Compute [Dec(sk_i^in, C_i^in)]_{i=1}^n = [n_i^in]_{i=1}^n
-	fmt.Println("   → Step 2: Decrypting note data using sk_i^in keys")
-
-	// Step 3: Compute (Γ_T^out, [Γ_i^out]_{i=1}^n, info) = F(Γ_T^in, [Γ_i^in, b_i]_{i=1}^n)
-	fmt.Println("   → Step 3: Running auction algorithm F(inputs) → outputs")
-
-	// Step 4: Create exchange payloads for the auctioneer
+	// Create exchange payloads for the auctioneer
 	exchangePayloads := make([]exchange.RegistrationPayload, N)
 	participantECDHPubKeys := make([]*ecdh.PublicKey, N)
 
@@ -336,14 +343,11 @@ func executeExchangePhase(state *ProtocolState) error {
 		participantECDHPubKeys[i] = state.ParticipantECDHKeys[i].PublicKey()
 	}
 
-	// Prepare DH private keys for circuit (CRITICAL: Must use REAL keys, not R=1!)
+	// Prepare DH private keys for circuit
 	participantDHPrivKeys := make([]*bls12377_fr.Element, N)
 	for i := 0; i < N; i++ {
 		participantDHPrivKeys[i] = state.ParticipantDHKeys[i].Sk
 	}
-
-	// Step 4: Execute Algorithm 3 with proper cryptographic parameters
-	fmt.Println("   → Step 4: Generating exchange proof π_F using CircuitTxF10")
 
 	exchangeTx, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
 		exchangePayloads,
@@ -363,8 +367,8 @@ func executeExchangePhase(state *ProtocolState) error {
 
 	state.ExchangeProof = exchangeProof
 
-	// Step 5: Create individual output transactions from exchange results
-	fmt.Println("   → Step 5: Creating individual output transactions for participants")
+	// Create individual output transactions from exchange results
+	fmt.Println("   → Creating output transactions...")
 
 	outputTxs := make([]*zerocash.Tx, 0)
 	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
@@ -397,14 +401,14 @@ func executeExchangePhase(state *ProtocolState) error {
 		return fmt.Errorf("failed to submit exchange results: %w", err)
 	}
 
-	fmt.Printf("   ✅ Exchange successful: proof generated (%d bytes)\n", len(state.ExchangeProof))
-	fmt.Println("   📈 Auction completed: sealed-bid double auction mechanism")
+	fmt.Printf("   ✅ Auction successful: proof generated (%d bytes)\n", len(state.ExchangeProof))
+	fmt.Println("   📈 Energy market completed")
 	return nil
 }
 
-// executeFinalizationPhase handles the finalization of the protocol
+// executeFinalizationPhase finalizes the protocol
 func executeFinalizationPhase(state *ProtocolState) error {
-	fmt.Println("📋 Merging temporary ledger lists to permanent state...")
+	fmt.Println("📋 Finalizing ledger state...")
 
 	// Close the auction and merge temporary lists to permanent
 	if err := state.Ledger.CloseAuction(); err != nil {
@@ -416,18 +420,18 @@ func executeFinalizationPhase(state *ProtocolState) error {
 		fmt.Printf("   ⚠️  Warning: Could not save final ledger: %v\n", err)
 	}
 
-	fmt.Println("   ✅ Ledger finalized: all temporary lists merged to permanent state")
-	fmt.Printf("   📊 Final ledger: %d commitments, %d serial numbers, %d transactions\n",
+	fmt.Println("   ✅ Ledger finalized")
+	fmt.Printf("   📊 Final state: %d commitments, %d serial numbers, %d transactions\n",
 		len(state.Ledger.CmList), len(state.Ledger.SnList), len(state.Ledger.TxList))
 
 	return nil
 }
 
-// executeWithdrawalDemo demonstrates Algorithm 4 for emergency scenarios
+// executeWithdrawalDemo demonstrates emergency withdrawal functionality
 func executeWithdrawalDemo(state *ProtocolState) {
-	fmt.Println("🎯 Algorithm 4: Withdraw(CmList_temp, r_enc, n^in, pk_T, sk^in, C_i) → (tx_draw^out, π_draw)")
+	fmt.Println("🚨 Testing emergency withdrawal...")
 	fmt.Println()
-	fmt.Println("💡 Note: This demonstrates emergency withdrawal when the auctioneer fails to execute Algorithm 3")
+	fmt.Println("💡 Note: This allows participants to recover funds if the auctioneer fails")
 	fmt.Println()
 
 	// Setup withdrawal circuit keys
@@ -442,19 +446,14 @@ func executeWithdrawalDemo(state *ProtocolState) {
 	for i := 0; i < 3; i++ {
 		fmt.Printf("👤 Participant_%02d Emergency Withdrawal:\n", i+1)
 
-		// ═══════════════════════════════════════════════════════════════
-		// ALGORITHM 4 IMPLEMENTATION (Following paper specification)
-		// ═══════════════════════════════════════════════════════════════
+		fmt.Println("   → Using registration data...")
+		fmt.Println("   → Computing withdrawal transaction...")
+		fmt.Println("   → Generating withdrawal proof...")
 
-		// Algorithm 4 uses the EXACT note that was created by Algorithm 1 during registration
-		// and the sk^in key that was generated during Algorithm 2
-		fmt.Println("   → Using note n^in created by Algorithm 1 during registration")
-		fmt.Println("   → Using sk^in key generated during Algorithm 2")
-
-		// CRITICAL FIX: Use the note created by Algorithm 1, not the original base note
-		registrationTx := state.RegistrationTxs[i] // tx^in from Algorithm 1
+		// Use the note created during registration
+		registrationTx := state.RegistrationTxs[i] // tx^in from registration
 		noteToWithdraw := registrationTx.NewNote   // n^in: The actual note sent to auctioneer
-		skIn := state.ParticipantSkIn[i]           // sk^in from Algorithm 2
+		skIn := state.ParticipantSkIn[i]           // sk^in from registration
 
 		// Create withdrawal note data structures
 		inNote := withdraw.Note{
@@ -484,9 +483,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			Y: state.AuctioneerDHKp.Pk.Y.String(),
 		}
 
-		// Use the EXACT same ciphertext from Algorithm 2 registration
-		// The CAux from registration contains: [pkOut, skIn, bid, coins, energy]
-		// Withdrawal uses the SAME 5-value format as registration
+		// Use the same ciphertext from registration
 		cipherAux := [5]*big.Int{
 			state.ParticipantCAux[i][0], // pkOut (encrypted)
 			state.ParticipantCAux[i][1], // skIn (encrypted)
@@ -495,10 +492,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			state.ParticipantCAux[i][4], // energy (encrypted)
 		}
 
-		fmt.Println("   → Step 1: Computing withdrawal transaction")
-		fmt.Println("   → Step 2: Generating withdrawal proof π_draw")
-
-		// Execute Algorithm 4: Withdraw
+		// Execute withdrawal
 		sharedSecretGnark := sw_bls12377.G1Affine{
 			X: state.SharedSecrets[i].X.String(),
 			Y: state.SharedSecrets[i].Y.String(),
@@ -516,7 +510,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 		)
 
 		if err != nil {
-			fmt.Printf("   ❌ Algorithm 4 failed: %v\n", err)
+			fmt.Printf("   ❌ Withdrawal failed: %v\n", err)
 			state.WithdrawalResults[i] = false
 		} else {
 			// Verify the withdrawal proof
@@ -606,83 +600,56 @@ func computeMimcCommitment(coins, energy, pk, rho, rand *big.Int) *big.Int {
 	return new(big.Int).SetBytes(h.Sum(nil))
 }
 
-// printProtocolSummary prints a comprehensive summary of the protocol execution
+// printProtocolSummary prints a summary of the protocol execution
 func printProtocolSummary(state *ProtocolState, totalTime time.Duration) {
 	fmt.Println("\n╔════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                     PROTOCOL EXECUTION SUMMARY                    ║")
+	fmt.Println("║                          EXECUTION SUMMARY                        ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
-	fmt.Printf("⏱️  Total Execution Time: %v\n", totalTime)
+	fmt.Printf("⏱️  Total Time: %v\n", totalTime)
 	fmt.Printf("👥 Participants: %d\n", N)
-	fmt.Printf("🏛️  Auctioneer: Configured with DH + ECDH keypairs\n")
-	fmt.Printf("📋 Protocol Phases: All 4 algorithms executed\n")
+	fmt.Printf("🏛️  Auctioneer: Configured\n")
 	fmt.Println()
 
-	fmt.Println("📊 ALGORITHM EXECUTION RESULTS:")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	fmt.Println("📊 RESULTS:")
+	fmt.Println("▔▔▔▔▔▔▔▔▔▔")
 
-	// Algorithm 2 Results
+	// Registration Results
 	registrationSuccess := 0
 	for i := 0; i < N; i++ {
 		if len(state.RegistrationProofs[i]) > 0 {
 			registrationSuccess++
 		}
 	}
-	fmt.Printf("✅ Algorithm 2 (Register): %d/%d successful\n", registrationSuccess, N)
-	fmt.Printf("   → ZK Proofs generated: %d (avg %d bytes)\n", registrationSuccess, 388)
-	fmt.Printf("   → Two-keypair system: (sk^in,pk^in) + (sk^out,pk^out)\n")
-	fmt.Printf("   → DH-OTP encryption: C^Aux data encrypted\n")
+	fmt.Printf("✅ Registration: %d/%d successful\n", registrationSuccess, N)
+	fmt.Printf("   → ZK proofs generated: %d\n", registrationSuccess)
 
-	// Algorithm 3 Results
+	// Exchange Results
 	exchangeSuccess := 0
 	if len(state.ExchangeProof) > 0 {
 		exchangeSuccess = 1
 	}
-	fmt.Printf("✅ Algorithm 3 (Exchange): %d/1 successful\n", exchangeSuccess)
-	fmt.Printf("   → Exchange proof: %d bytes\n", len(state.ExchangeProof))
-	fmt.Printf("   → Auction mechanism: Sealed-bid double auction\n")
-	fmt.Printf("   → Cryptographic verification: REAL DH private keys used\n")
+	fmt.Printf("✅ Exchange: %d/1 successful\n", exchangeSuccess)
+	fmt.Printf("   → Proof size: %d bytes\n", len(state.ExchangeProof))
 
-	// Algorithm 4 Results (withdrawal demo)
+	// Withdrawal Results
 	withdrawalSuccess := 0
 	for i := 0; i < 3; i++ {
 		if state.WithdrawalResults[i] {
 			withdrawalSuccess++
 		}
 	}
-	fmt.Printf("🚨 Algorithm 4 (Withdraw): %d/3 emergency scenarios tested\n", withdrawalSuccess)
-	fmt.Printf("   → Uses exact registration keys: sk^in, pk^in from Algorithm 2\n")
-	fmt.Printf("   → Emergency recovery: Available when auctioneer fails\n")
-
+	fmt.Printf("✅ Withdrawal: %d/3 tests successful\n", withdrawalSuccess)
 	fmt.Println()
-	fmt.Println("🔐 CRYPTOGRAPHIC PROPERTIES VERIFIED:")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
-	fmt.Println("✅ Real DH key exchange (no R=1 shortcuts)")
-	fmt.Println("✅ Real BLS12-377 elliptic curve operations")
-	fmt.Println("✅ Real Groth16 zero-knowledge proofs")
-	fmt.Println("✅ Real MiMC hash function commitments")
-	fmt.Println("✅ Proper two-keypair system implementation")
-	fmt.Println("✅ Correct note tracking between algorithms")
 
-	fmt.Println()
 	fmt.Printf("📚 Final Ledger State:\n")
-	fmt.Printf("   → Commitments (CmList): %d entries\n", len(state.Ledger.CmList))
-	fmt.Printf("   → Serial Numbers (SnList): %d entries\n", len(state.Ledger.SnList))
-	fmt.Printf("   → Transactions (TxList): %d entries\n", len(state.Ledger.TxList))
-	fmt.Printf("   → Protocol Phase: %s\n", state.Ledger.GetCurrentPhase())
-
+	fmt.Printf("   → Commitments: %d entries\n", len(state.Ledger.CmList))
+	fmt.Printf("   → Serial Numbers: %d entries\n", len(state.Ledger.SnList))
+	fmt.Printf("   → Transactions: %d entries\n", len(state.Ledger.TxList))
 	fmt.Println()
-	fmt.Println("🎯 PAPER COMPLIANCE STATUS:")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
-	fmt.Println("✅ Algorithm 1: Transaction - Fully implemented")
-	fmt.Println("✅ Algorithm 2: Register - Fully implemented with two keypairs")
-	fmt.Println("✅ Algorithm 3: Exchange - Fully implemented with real DH keys")
-	fmt.Println("✅ Algorithm 4: Withdraw - Fully implemented for emergencies")
-	fmt.Println("✅ All cryptographic primitives: Real implementations (no simulation)")
-	fmt.Println("✅ Protocol flow: Exact specification compliance")
 
-	fmt.Println()
-	fmt.Println("🏆 Privacy-Preserving Energy Market Protocol: SUCCESSFULLY EXECUTED")
+	fmt.Println("🏆 Privacy-Preserving Energy Market Protocol: COMPLETED")
 	fmt.Println("═══════════════════════════════════════════════════════════════════════")
+	fmt.Println()
 }
