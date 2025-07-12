@@ -162,6 +162,10 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		cm := hasher.Sum()
 		api.AssertIsEqual(c.OutCm[coin], cm)
 
+		// --- Verify the auction logic ---
+		// HERE you have to compute the OutCoinComputed and OutEnergyComputed and assert that
+		// OutCoinComputed = OutCoin and OutEnergyComputed = OutEnergy
+
 		// --- Verify DH encryption constraints ---
 		// EncKey = G_b^R (same variable used for both decryption and DH verification)
 		G_r_b := new(sw_bls12377.G1Affine)

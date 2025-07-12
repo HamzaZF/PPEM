@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"flag"
 	"fmt"
 	"log"
 	"math/big"
@@ -379,14 +380,20 @@ type CircuitKeys struct {
 }
 
 func main() {
+	// Parse command-line flags
+	var numParticipants int
+	flag.IntVar(&numParticipants, "n", 30, "Number of participants (default: 30)")
+	flag.Parse()
+
 	fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)")
 	fmt.Println("================================================")
+	fmt.Printf("Configuration: N=%d participants\n", numParticipants)
 	fmt.Println()
 
 	startTime := time.Now()
 
 	// STEP 1: Configure market scenario
-	config := createMarketConfigForN(30) // N=30 participants (DYNAMIC SCALING)
+	config := createMarketConfigForN(numParticipants) // Dynamic scaling based on flag
 	// Uncomment to try different scenarios for benchmarking:
 	// config := createMarketConfig5Participants()  // N=5 participants
 	// config := createDefaultMarketConfig()        // N=10 participants
