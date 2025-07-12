@@ -1,0 +1,14 @@
+Privacy-Preserving Energy Market Protocol (PPEM)
+================================================
+Configuration: N=10 participants
+
+SETUP PHASE
+===========
+Initializing cryptographic system...
+  - Compiling zero-knowledge circuits...
+[90m18:51:19[0m [32mINF[0m [1mcompiling circuit[0m
+[90m18:51:19[0m [32mINF[0m [1mparsed circuit inputs[0m [36mnbPublic=[0m20 [36mnbSecret=[0m9
+[90m18:51:19[0m [32mINF[0m [1mbuilding constraint builder[0m [36mnbConstraints=[0m10658
+[90m18:51:26[0m [32mINF[0m [1mcompiling circuit[0m
+[90m18:51:26[0m [32mINF[0m [1mparsed circuit inputs[0m [36mnbPublic=[0m15 [36mnbSecret=[0m10
+[90m18:51:26[0m [32mINF[0m [1mbuilding constraint builder[0m [36mnbConstraints=[0m8699

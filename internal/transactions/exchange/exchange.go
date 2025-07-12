@@ -12,6 +12,7 @@ import (
 	"crypto/ecdh"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"time"
@@ -156,15 +157,13 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 
 // RunAuctionLogic implements a sealed-bid double auction mechanism (SBExM)
 // This is the core auction algorithm that matches buyers and sellers
-// NOTE: Participant roles are now explicitly defined in main.go, no guessing needed!
+// Now implements proper market clearing price computation and fixed-point arithmetic
 func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	if len(inputs) == 0 {
 		return inputs
 	}
 
-	// SIMPLIFIED: Use the explicit participant roles defined in main.go
-	// For N=10: Buyers: participants 0-4, Sellers: participants 5-9
-	// For N=20: Buyers: participants 0-9, Sellers: participants 10-19
+	// Separate participants into buyers and sellers
 	var buyers, sellers []int
 	numParticipants := len(inputs)
 
@@ -172,16 +171,16 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 		if numParticipants == 10 {
 			// N=10: first 5 are buyers, last 5 are sellers
 			if i < 5 {
-				buyers = append(buyers, i) // Participants 0-4 are BUYERS
+				buyers = append(buyers, i)
 			} else {
-				sellers = append(sellers, i) // Participants 5-9 are SELLERS
+				sellers = append(sellers, i)
 			}
 		} else if numParticipants == 20 {
 			// N=20: first 10 are buyers, last 10 are sellers
 			if i < 10 {
-				buyers = append(buyers, i) // Participants 0-9 are BUYERS
+				buyers = append(buyers, i)
 			} else {
-				sellers = append(sellers, i) // Participants 10-19 are SELLERS
+				sellers = append(sellers, i)
 			}
 		} else {
 			// Default: first half are buyers, second half are sellers
@@ -210,83 +209,211 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 		return bidI.Cmp(bidJ) > 0
 	})
 
-	// Sort sellers by bid (ascending - lowest ask prices first)
+	// Sort sellers by ask (ascending - lowest ask prices first)
 	sort.Slice(sellers, func(i, j int) bool {
-		bidI := inputs[sellers[i]].Bid
-		bidJ := inputs[sellers[j]].Bid
-		if bidI == nil && bidJ == nil {
+		askI := inputs[sellers[i]].Bid
+		askJ := inputs[sellers[j]].Bid
+		if askI == nil && askJ == nil {
 			return false
 		}
-		if bidI == nil {
+		if askI == nil {
 			return true
 		}
-		if bidJ == nil {
+		if askJ == nil {
 			return false
 		}
-		return bidI.Cmp(bidJ) < 0
+		return askI.Cmp(askJ) < 0
 	})
 
+	// Compute market clearing price using uniform price auction
+	marketClearingPrice := computeMarketClearingPrice(inputs, buyers, sellers)
+
+	// Execute uniform price auction
+	outputs := executeUniformPriceAuction(inputs, buyers, sellers, marketClearingPrice)
+
+	return outputs
+}
+
+// scaleToFixedPoint converts a big.Int to fixed-point representation
+func scaleToFixedPoint(value *big.Int, scale int64) *big.Int {
+	if value == nil {
+		return big.NewInt(0)
+	}
+	scaled := new(big.Int)
+	scaled.Mul(value, big.NewInt(scale))
+	return scaled
+}
+
+// scaleFromFixedPoint converts from fixed-point back to regular representation
+func scaleFromFixedPoint(value *big.Int, scale int64) *big.Int {
+	if value == nil {
+		return big.NewInt(0)
+	}
+	scaled := new(big.Int)
+	scaled.Div(value, big.NewInt(scale))
+	return scaled
+}
+
+// computeMarketClearingPrice finds the market clearing price for uniform price auction
+func computeMarketClearingPrice(inputs []DecryptedRegistration, buyers, sellers []int) *big.Int {
+	if len(buyers) == 0 || len(sellers) == 0 {
+		return big.NewInt(0)
+	}
+
+	// Compute average bid and ask prices
+	buySum := big.NewInt(0)
+	sellSum := big.NewInt(0)
+
+	for _, buyerIdx := range buyers {
+		if inputs[buyerIdx].Bid != nil {
+			buySum.Add(buySum, inputs[buyerIdx].Bid)
+		}
+	}
+
+	for _, sellerIdx := range sellers {
+		if inputs[sellerIdx].Bid != nil {
+			sellSum.Add(sellSum, inputs[sellerIdx].Bid)
+		}
+	}
+
+	// Average bid and ask prices
+	avgBuyPrice := new(big.Int)
+	avgBuyPrice.Div(buySum, big.NewInt(int64(len(buyers))))
+
+	avgSellPrice := new(big.Int)
+	avgSellPrice.Div(sellSum, big.NewInt(int64(len(sellers))))
+
+	// Market clearing price = midpoint of average bid and ask
+	clearingPrice := new(big.Int)
+	clearingPrice.Add(avgBuyPrice, avgSellPrice)
+	clearingPrice.Div(clearingPrice, big.NewInt(2))
+
+	return clearingPrice
+}
+
+// executeUniformPriceAuction executes trades at the market clearing price
+func executeUniformPriceAuction(inputs []DecryptedRegistration, buyers, sellers []int, marketPrice *big.Int) []DecryptedRegistration {
 	// Create output array (copy of inputs initially)
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
-	// Execute double auction matching
-	buyerIdx, sellerIdx := 0, 0
-	for buyerIdx < len(buyers) && sellerIdx < len(sellers) {
-		buyer := buyers[buyerIdx]
-		seller := sellers[sellerIdx]
+	// Fixed trade quantity (10 energy units per trade)
+	tradeQuantity := big.NewInt(10)
 
-		buyerBid := inputs[buyer].Bid
-		sellerBid := inputs[seller].Bid
-
-		if buyerBid == nil || sellerBid == nil {
-			break
-		}
-
-		// Check if trade is possible (buyer bid >= seller ask)
-		if buyerBid.Cmp(sellerBid) >= 0 {
-			// Calculate trade price (midpoint between bid and ask)
-			tradePrice := new(big.Int)
-			tradePrice.Add(buyerBid, sellerBid)
-			tradePrice.Div(tradePrice, big.NewInt(2))
-
-			// Calculate trade quantity (minimum of what buyer wants and seller has)
-			buyerWantedEnergy := inputs[buyer].Energy
-			sellerAvailableEnergy := inputs[seller].Energy
-
-			tradeQuantity := new(big.Int)
-			if buyerWantedEnergy.Cmp(sellerAvailableEnergy) <= 0 {
-				tradeQuantity.Set(buyerWantedEnergy)
-			} else {
-				tradeQuantity.Set(sellerAvailableEnergy)
-			}
-
-			// Calculate total trade value
+	// Execute trades for buyers
+	for _, buyerIdx := range buyers {
+		if shouldParticipantTrade(inputs[buyerIdx], marketPrice, true) {
+			// Buyer trades: lose coins, gain energy
 			tradeValue := new(big.Int)
-			tradeValue.Mul(tradePrice, tradeQuantity)
+			tradeValue.Mul(marketPrice, tradeQuantity)
 
-			// Update buyer: gains energy, loses coins
-			if outputs[buyer].Energy != nil && outputs[buyer].Coins != nil {
-				outputs[buyer].Energy.Add(outputs[buyer].Energy, tradeQuantity)
-				outputs[buyer].Coins.Sub(outputs[buyer].Coins, tradeValue)
+			if outputs[buyerIdx].Coins != nil {
+				outputs[buyerIdx].Coins = new(big.Int).Sub(outputs[buyerIdx].Coins, tradeValue)
 			}
-
-			// Update seller: loses energy, gains coins
-			if outputs[seller].Energy != nil && outputs[seller].Coins != nil {
-				outputs[seller].Energy.Sub(outputs[seller].Energy, tradeQuantity)
-				outputs[seller].Coins.Add(outputs[seller].Coins, tradeValue)
+			if outputs[buyerIdx].Energy != nil {
+				outputs[buyerIdx].Energy = new(big.Int).Add(outputs[buyerIdx].Energy, tradeQuantity)
 			}
+		}
+	}
 
-			// Move to next participants
-			buyerIdx++
-			sellerIdx++
-		} else {
-			// No more profitable trades possible
-			break
+	// Execute trades for sellers
+	for _, sellerIdx := range sellers {
+		if shouldParticipantTrade(inputs[sellerIdx], marketPrice, false) {
+			// Seller trades: gain coins, lose energy
+			tradeValue := new(big.Int)
+			tradeValue.Mul(marketPrice, tradeQuantity)
+
+			if outputs[sellerIdx].Coins != nil {
+				outputs[sellerIdx].Coins = new(big.Int).Add(outputs[sellerIdx].Coins, tradeValue)
+			}
+			if outputs[sellerIdx].Energy != nil {
+				outputs[sellerIdx].Energy = new(big.Int).Sub(outputs[sellerIdx].Energy, tradeQuantity)
+			}
 		}
 	}
 
 	return outputs
+}
+
+// shouldParticipantTrade determines if a participant should trade at the market price
+func shouldParticipantTrade(participant DecryptedRegistration, marketPrice *big.Int, isBuyer bool) bool {
+	if participant.Bid == nil || marketPrice == nil {
+		return false
+	}
+
+	if isBuyer {
+		// Buyer trades if bid >= market price
+		return participant.Bid.Cmp(marketPrice) >= 0
+	} else {
+		// Seller trades if ask <= market price (bid is their ask price)
+		return participant.Bid.Cmp(marketPrice) <= 0
+	}
+}
+
+// AnalyzePrecisionLoss analyzes the precision loss from fixed-point arithmetic
+func AnalyzePrecisionLoss(originalValue float64, scaleBits int) PrecisionMetrics {
+	scale := 1 << scaleBits
+
+	// Convert to fixed-point and back
+	fixedPoint := int64(originalValue * float64(scale))
+	recovered := float64(fixedPoint) / float64(scale)
+
+	absoluteError := math.Abs(originalValue - recovered)
+	var relativeError float64
+	if originalValue != 0 {
+		relativeError = absoluteError / math.Abs(originalValue)
+	}
+
+	return PrecisionMetrics{
+		Original:      originalValue,
+		Recovered:     recovered,
+		AbsoluteError: absoluteError,
+		RelativeError: relativeError,
+		ScaleBits:     scaleBits,
+	}
+}
+
+// PrecisionMetrics holds precision analysis results
+type PrecisionMetrics struct {
+	Original      float64
+	Recovered     float64
+	AbsoluteError float64
+	RelativeError float64
+	ScaleBits     int
+}
+
+// ValidatePrecisionRequirements validates that precision requirements are met
+func ValidatePrecisionRequirements(testCases []PrecisionTestCase) []PrecisionResult {
+	results := make([]PrecisionResult, len(testCases))
+
+	for i, testCase := range testCases {
+		metrics := AnalyzePrecisionLoss(testCase.Value, testCase.ScaleBits)
+		results[i] = PrecisionResult{
+			TestCase:      testCase,
+			Metrics:       metrics,
+			PassesTest:    metrics.AbsoluteError <= testCase.MaxAbsoluteError,
+			PassesRelTest: metrics.RelativeError <= testCase.MaxRelativeError,
+		}
+	}
+
+	return results
+}
+
+// PrecisionTestCase defines a test case for precision analysis
+type PrecisionTestCase struct {
+	Name             string
+	Value            float64
+	ScaleBits        int
+	MaxAbsoluteError float64
+	MaxRelativeError float64
+}
+
+// PrecisionResult holds the result of a precision test
+type PrecisionResult struct {
+	TestCase      PrecisionTestCase
+	Metrics       PrecisionMetrics
+	PassesTest    bool
+	PassesRelTest bool
 }
 
 // Helper to create a valid random G1Affine point as a gnark struct
@@ -492,10 +619,22 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 		w.InRho[i] = toVar(rho)
 		w.InRand[i] = toVar(rand)
 
-		// Set outputs equal to inputs to satisfy circuit constraints
-		w.OutCoin[i] = toVar(coins)
-		w.OutEnergy[i] = toVar(energy)
-		w.OutCm[i] = toVar(cm)
+		// Set outputs from auction results
+		var outputCoins, outputEnergy *big.Int
+		if i < len(outputs) {
+			outputCoins = outputs[i].Coins
+			outputEnergy = outputs[i].Energy
+		} else {
+			outputCoins = coins
+			outputEnergy = energy
+		}
+
+		// Compute output commitment with actual auction outputs
+		outCm := computeCommitment(outputCoins, outputEnergy, pkOut, rho, rand)
+
+		w.OutCoin[i] = toVar(outputCoins)
+		w.OutEnergy[i] = toVar(outputEnergy)
+		w.OutCm[i] = toVar(outCm)
 		w.OutSn[i] = toVar(sn)
 		w.OutPk[i] = toVar(pkOut)
 		w.OutRho[i] = toVar(rho)
@@ -765,10 +904,22 @@ func BuildWitnessF20(inputs, outputs []DecryptedRegistration, payloads []Registr
 		w.InRho[i] = toVar(rho)
 		w.InRand[i] = toVar(rand)
 
-		// Set outputs equal to inputs to satisfy circuit constraints
-		w.OutCoin[i] = toVar(coins)
-		w.OutEnergy[i] = toVar(energy)
-		w.OutCm[i] = toVar(cm)
+		// Set outputs from auction results
+		var outputCoins, outputEnergy *big.Int
+		if i < len(outputs) {
+			outputCoins = outputs[i].Coins
+			outputEnergy = outputs[i].Energy
+		} else {
+			outputCoins = coins
+			outputEnergy = energy
+		}
+
+		// Compute output commitment with actual auction outputs
+		outCm := computeCommitment(outputCoins, outputEnergy, pkOut, rho, rand)
+
+		w.OutCoin[i] = toVar(outputCoins)
+		w.OutEnergy[i] = toVar(outputEnergy)
+		w.OutCm[i] = toVar(outCm)
 		w.OutSn[i] = toVar(sn)
 		w.OutPk[i] = toVar(pkOut)
 		w.OutRho[i] = toVar(rho)
@@ -1175,10 +1326,32 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		circuit.InRho[i] = toVar(rho)
 		circuit.InRand[i] = toVar(rand)
 
-		// Set outputs equal to inputs to satisfy circuit constraints
-		circuit.OutCoin[i] = toVar(coins)
-		circuit.OutEnergy[i] = toVar(energy)
-		circuit.OutCm[i] = toVar(cm)
+		// Set outputs from auction results
+		var outputCoins, outputEnergy *big.Int
+		if i < len(outputs) {
+			outputCoins = outputs[i].Coins
+			outputEnergy = outputs[i].Energy
+		} else {
+			outputCoins = coins
+			outputEnergy = energy
+		}
+
+		// DEBUG: Log the witness values
+		if i == 0 {
+			fmt.Printf("=== WITNESS DEBUG (Participant %d) ===\n", i)
+			fmt.Printf("Input coins: %v\n", coins)
+			fmt.Printf("Input energy: %v\n", energy)
+			fmt.Printf("Output coins: %v\n", outputCoins)
+			fmt.Printf("Output energy: %v\n", outputEnergy)
+			fmt.Printf("Bid: %v\n", bid)
+		}
+
+		// Compute output commitment with actual auction outputs
+		outCm := computeCommitment(outputCoins, outputEnergy, pkOut, rho, rand)
+
+		circuit.OutCoin[i] = toVar(outputCoins)
+		circuit.OutEnergy[i] = toVar(outputEnergy)
+		circuit.OutCm[i] = toVar(outCm)
 		circuit.OutSn[i] = toVar(sn)
 		circuit.OutPk[i] = toVar(pkOut)
 		circuit.OutRho[i] = toVar(rho)
@@ -1339,8 +1512,20 @@ func ExchangePhaseWithNotes(
 		}
 	}
 
+	// DEBUG: Print the inputs before auction
+	fmt.Printf("=== AUCTION INPUTS ===\n")
+	for i, input := range inputs {
+		fmt.Printf("Participant %d: bid=%v, coins=%v, energy=%v\n", i, input.Bid, input.Coins, input.Energy)
+	}
+
 	// 4. Run auction logic - sophisticated sealed-bid double auction mechanism
 	outputs := RunAuctionLogic(inputs)
+
+	// DEBUG: Print the outputs after auction
+	fmt.Printf("=== AUCTION OUTPUTS ===\n")
+	for i, output := range outputs {
+		fmt.Printf("Participant %d: bid=%v, coins=%v, energy=%v\n", i, output.Bid, output.Coins, output.Energy)
+	}
 
 	// 5. Build witness using the dynamic circuit approach
 
