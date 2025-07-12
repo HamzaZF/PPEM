@@ -1,8 +1,7 @@
 // circuit.go - Circuit for the auction phase (exchange) of the protocol.
 //
-// Defines CircuitTxF10 for N=10 participants and CircuitTxF20 for N=20 participants,
-// enforcing cryptographic consistency (decryption, PRF, commitments, EC operations)
-// but not the auction logic itself.
+// Defines dynamic circuits for any N participants, enforcing cryptographic consistency
+// (decryption, PRF, commitments, EC operations) but not the auction logic itself.
 //
 // WARNING: This circuit does NOT enforce the auction computation. Only cryptographic consistency is proven.
 
@@ -55,7 +54,139 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 	return hasher.Sum()
 }
 
+// CircuitTxFN represents a dynamic circuit for N coins/participants in the auction phase.
+// This circuit can be generated for any number of participants.
+type CircuitTxFN struct {
+	// Number of participants this circuit supports
+	N int
+
+	// ----- Input/Output Arrays for N coins -----
+	InCoin   []frontend.Variable `gnark:",public"`
+	InEnergy []frontend.Variable `gnark:",public"`
+	InCm     []frontend.Variable `gnark:",public"`
+	InSn     []frontend.Variable `gnark:",public"`
+	InPk     []frontend.Variable `gnark:",public"`
+	InSk     []frontend.Variable `gnark:",public"`
+	InRho    []frontend.Variable `gnark:",public"`
+	InRand   []frontend.Variable `gnark:",public"`
+
+	OutCoin   []frontend.Variable `gnark:",public"`
+	OutEnergy []frontend.Variable `gnark:",public"`
+	OutCm     []frontend.Variable `gnark:",public"`
+	OutSn     []frontend.Variable `gnark:",public"`
+	OutPk     []frontend.Variable `gnark:",public"`
+	OutRho    []frontend.Variable `gnark:",public"`
+	OutRand   []frontend.Variable `gnark:",public"`
+
+	C      [][]frontend.Variable
+	DecVal [][]frontend.Variable
+
+	// ----- DH Parameters for each coin -----
+	R      []frontend.Variable
+	G      []sw_bls12377.G1Affine `gnark:",public"`
+	G_b    []sw_bls12377.G1Affine `gnark:",public"`
+	G_r    []sw_bls12377.G1Affine `gnark:",public"`
+	EncKey []sw_bls12377.G1Affine // DH shared secret: used for both decryption and DH verification
+}
+
+// NewCircuitTxFN creates a new dynamic circuit for N participants
+func NewCircuitTxFN(n int) *CircuitTxFN {
+	if n <= 0 {
+		panic("CircuitTxFN: N must be positive")
+	}
+
+	circuit := &CircuitTxFN{
+		N: n,
+		// Initialize arrays with proper sizes
+		InCoin:   make([]frontend.Variable, n),
+		InEnergy: make([]frontend.Variable, n),
+		InCm:     make([]frontend.Variable, n),
+		InSn:     make([]frontend.Variable, n),
+		InPk:     make([]frontend.Variable, n),
+		InSk:     make([]frontend.Variable, n),
+		InRho:    make([]frontend.Variable, n),
+		InRand:   make([]frontend.Variable, n),
+
+		OutCoin:   make([]frontend.Variable, n),
+		OutEnergy: make([]frontend.Variable, n),
+		OutCm:     make([]frontend.Variable, n),
+		OutSn:     make([]frontend.Variable, n),
+		OutPk:     make([]frontend.Variable, n),
+		OutRho:    make([]frontend.Variable, n),
+		OutRand:   make([]frontend.Variable, n),
+
+		C:      make([][]frontend.Variable, n),
+		DecVal: make([][]frontend.Variable, n),
+
+		R:      make([]frontend.Variable, n),
+		G:      make([]sw_bls12377.G1Affine, n),
+		G_b:    make([]sw_bls12377.G1Affine, n),
+		G_r:    make([]sw_bls12377.G1Affine, n),
+		EncKey: make([]sw_bls12377.G1Affine, n),
+	}
+
+	// Initialize 2D arrays
+	for i := 0; i < n; i++ {
+		circuit.C[i] = make([]frontend.Variable, 5)
+		circuit.DecVal[i] = make([]frontend.Variable, 5)
+	}
+
+	return circuit
+}
+
+// Define implements the constraints for CircuitTxFN using dynamic arrays and for loops.
+func (c *CircuitTxFN) Define(api frontend.API) error {
+	// Process all N coins using a for loop
+	for coin := 0; coin < c.N; coin++ {
+		// --- Decrypt and verify the registration data ---
+		decVal := DecZKReg(api, c.C[coin][:], c.EncKey[coin])
+		for i := 0; i < 5; i++ {
+			api.AssertIsEqual(c.DecVal[coin][i], decVal[i])
+		}
+
+		// --- Verify serial number computation ---
+		snComputed := PRF(api, c.InSk[coin], c.InRho[coin])
+		api.AssertIsEqual(c.InSn[coin], snComputed)
+
+		// --- Preserve coin and energy values ---
+		api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
+		api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
+
+		// --- Compute output commitment: cm = Com(Γ || pk || ρ, r) where Γ = (coins, energy) ---
+		hasher, _ := mimc.NewMiMC(api)
+		hasher.Write(c.OutCoin[coin])   // Γ.coins
+		hasher.Write(c.OutEnergy[coin]) // Γ.energy
+		hasher.Write(c.OutPk[coin])     // pk (public key)
+		hasher.Write(c.OutRho[coin])    // ρ (rho)
+		hasher.Write(c.OutRand[coin])   // r (randomness)
+		cm := hasher.Sum()
+		api.AssertIsEqual(c.OutCm[coin], cm)
+
+		// --- Verify DH encryption constraints ---
+		// EncKey = G_b^R (same variable used for both decryption and DH verification)
+		G_r_b := new(sw_bls12377.G1Affine)
+		G_r_b.ScalarMul(api, c.G_b[coin], c.R[coin])
+		api.AssertIsEqual(c.EncKey[coin].X, G_r_b.X)
+		api.AssertIsEqual(c.EncKey[coin].Y, G_r_b.Y)
+
+		// G_r = G^R
+		G_r := new(sw_bls12377.G1Affine)
+		G_r.ScalarMul(api, c.G[coin], c.R[coin])
+		api.AssertIsEqual(c.G_r[coin].X, G_r.X)
+		api.AssertIsEqual(c.G_r[coin].Y, G_r.Y)
+
+		// --- Verify public key derivation: InPk = MiMC(InSk) ---
+		hasher.Reset()
+		hasher.Write(c.InSk[coin])
+		pk := hasher.Sum()
+		api.AssertIsEqual(c.InPk[coin], pk)
+	}
+
+	return nil
+}
+
 // CircuitTxF10 represents a circuit for 10 coins/participants in the auction phase.
+// DEPRECATED: Use CircuitTxFN instead for better scalability.
 type CircuitTxF10 struct {
 	// ----- Input/Output Arrays for 10 coins -----
 	InCoin   [10]frontend.Variable `gnark:",public"`
@@ -87,6 +218,7 @@ type CircuitTxF10 struct {
 }
 
 // CircuitTxF20 represents a circuit for 20 coins/participants in the auction phase.
+// DEPRECATED: Use CircuitTxFN instead for better scalability.
 type CircuitTxF20 struct {
 	// ----- Input/Output Arrays for 20 coins -----
 	InCoin   [20]frontend.Variable `gnark:",public"`

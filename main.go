@@ -249,6 +249,47 @@ func createTestingScenario() MarketConfig {
 	return config
 }
 
+// createMarketConfigForN creates a market configuration for any number of participants
+func createMarketConfigForN(n int) MarketConfig {
+	if n <= 0 {
+		panic("createMarketConfigForN: N must be positive")
+	}
+
+	// Create roles map: first half are buyers, second half are sellers
+	roles := make(map[int]zerocash.OrderType)
+	buyers := n / 2
+
+	for i := 0; i < buyers; i++ {
+		roles[i] = zerocash.BUY
+	}
+	for i := buyers; i < n; i++ {
+		roles[i] = zerocash.SELL
+	}
+
+	// Create initial balances
+	initialCoins := make([]int64, n)
+	initialEnergy := make([]int64, n)
+	bidPrices := make([]int64, n)
+
+	for i := 0; i < n; i++ {
+		initialCoins[i] = int64(1000 + i*100)
+		initialEnergy[i] = int64(50 + i*10)
+		bidPrices[i] = int64(20 + i*5)
+	}
+
+	return MarketConfig{
+		NumParticipants: n,
+		AuctionType:     "sealed-bid-double-auction",
+		Roles:           roles,
+		InitialCoins:    initialCoins,
+		InitialEnergy:   initialEnergy,
+		BidPrices:       bidPrices,
+		WithdrawalMode:  "none",
+		WithdrawAll:     false,
+		WithdrawList:    []int{},
+	}
+}
+
 // validateConfig ensures the market configuration is valid
 func validateConfig(config MarketConfig) error {
 	if config.NumParticipants <= 0 {
@@ -328,9 +369,13 @@ type ProtocolState struct {
 
 // CircuitKeys holds all the cryptographic circuit keys needed for ZK proofs
 type CircuitKeys struct {
+	// Fixed circuits (for backward compatibility)
 	pkTx, pkReg, pkF10, pkF20, pkWithdraw      groth16.ProvingKey
 	vkTx, vkReg, vkF10, vkF20, vkWithdraw      groth16.VerifyingKey
 	ccsTx, ccsReg, ccsF10, ccsF20, ccsWithdraw constraint.ConstraintSystem
+
+	// Dynamic circuit manager for any N participants
+	DynamicManager *exchange.CircuitKeyManager
 }
 
 func main() {
@@ -341,16 +386,21 @@ func main() {
 	startTime := time.Now()
 
 	// STEP 1: Configure market scenario
-	config := createMarketConfig20Participants() // N=20 participants
+	config := createMarketConfigForN(30) // N=30 participants (DYNAMIC SCALING)
 	// Uncomment to try different scenarios for benchmarking:
 	// config := createMarketConfig5Participants()  // N=5 participants
 	// config := createDefaultMarketConfig()        // N=10 participants
 	// config := createMarketConfig15Participants() // N=15 participants
+	// config := createMarketConfig20Participants() // N=20 participants
 	// config := createMarketConfig25Participants() // N=25 participants
 	// config := createHighDemandScenario()
 	// config := createLowSupplyScenario()
 	// config := createEmergencyScenario()
 	// config := createTestingScenario()
+
+	// DYNAMIC SCALING: Use this for any number of participants
+	// config := createMarketConfigForN(50)  // N=50 participants
+	// config := createMarketConfigForN(100) // N=100 participants
 
 	// Validate configuration
 	if err := validateConfig(config); err != nil {
@@ -420,7 +470,7 @@ func setupProtocol(state *ProtocolState) error {
 	// Step 1: Compile ZK circuits
 	fmt.Println("  - Compiling zero-knowledge circuits...")
 	var err error
-	state.CircuitKeys, err = setupCircuitKeys()
+	state.CircuitKeys, err = setupCircuitKeys(state.Config.NumParticipants)
 	if err != nil {
 		return fmt.Errorf("circuit setup failed: %w", err)
 	}
@@ -609,18 +659,14 @@ func executeExchangePhase(state *ProtocolState) error {
 		participantDHPrivKeys[i] = state.ParticipantDHKeys[i].Sk
 	}
 
-	// Choose the appropriate circuit based on number of participants
-	var pk groth16.ProvingKey
-	var ccs constraint.ConstraintSystem
-
-	if state.Config.NumParticipants == 20 {
-		pk = state.CircuitKeys.pkF20
-		ccs = state.CircuitKeys.ccsF20
-	} else {
-		// Default to N=10 circuit
-		pk = state.CircuitKeys.pkF10
-		ccs = state.CircuitKeys.ccsF10
+	// Get dynamic circuit keys for the number of participants
+	dynamicKeys, err := state.CircuitKeys.DynamicManager.GetOrCreateCircuitKeys(state.Config.NumParticipants)
+	if err != nil {
+		return fmt.Errorf("failed to get circuit keys for %d participants: %w", state.Config.NumParticipants, err)
 	}
+
+	pk := dynamicKeys.ProvingKey
+	ccs := dynamicKeys.ConstraintSystem
 
 	exchangeTx, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
 		exchangePayloads,
@@ -828,9 +874,12 @@ func executeWithdrawalDemo(state *ProtocolState) {
 
 // Helper functions
 
-func setupCircuitKeys() (*CircuitKeys, error) {
+func setupCircuitKeys(participantCount int) (*CircuitKeys, error) {
 	keys := &CircuitKeys{}
 	var err error
+
+	// Initialize dynamic circuit manager
+	keys.DynamicManager = exchange.NewCircuitKeyManager()
 
 	// Compile circuits for all 4 algorithms
 	var circuitTx zerocash.CircuitTx
@@ -853,24 +902,10 @@ func setupCircuitKeys() (*CircuitKeys, error) {
 		return nil, err
 	}
 
-	var circuitF10 exchange.CircuitTxF10
-	keys.ccsF10, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF10)
-	if err != nil {
-		return nil, err
-	}
-	keys.pkF10, keys.vkF10, err = groth16.Setup(keys.ccsF10)
-	if err != nil {
-		return nil, err
-	}
-
-	var circuitF20 exchange.CircuitTxF20
-	keys.ccsF20, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF20)
-	if err != nil {
-		return nil, err
-	}
-	keys.pkF20, keys.vkF20, err = groth16.Setup(keys.ccsF20)
-	if err != nil {
-		return nil, err
+	// Precompile only the specific N we need
+	specificN := []int{participantCount}
+	if err := keys.DynamicManager.PrecompileCircuits(specificN); err != nil {
+		return nil, fmt.Errorf("failed to precompile circuit for N=%d: %w", participantCount, err)
 	}
 
 	return keys, nil
