@@ -67,6 +67,141 @@ func createDefaultMarketConfig() MarketConfig {
 	}
 }
 
+// createMarketConfig5Participants creates a configuration for 5 participants
+func createMarketConfig5Participants() MarketConfig {
+	return MarketConfig{
+		NumParticipants: 5,
+		AuctionType:     "sealed-bid-double-auction",
+
+		// Participant roles: first 2 are buyers, last 3 are sellers
+		Roles: map[int]zerocash.OrderType{
+			0: zerocash.BUY, 1: zerocash.BUY,
+			2: zerocash.SELL, 3: zerocash.SELL, 4: zerocash.SELL,
+		},
+
+		// Initial balances for 5 participants
+		InitialCoins:  []int64{1000, 1200, 1500, 1700, 1900},
+		InitialEnergy: []int64{50, 70, 100, 120, 140},
+
+		// Bid prices: buyers bid higher, sellers ask higher
+		BidPrices: []int64{30, 40, 60, 70, 80},
+
+		// No withdrawal by default
+		WithdrawalMode: "none",
+		WithdrawAll:    false,
+		WithdrawList:   []int{},
+	}
+}
+
+// createMarketConfig15Participants creates a configuration for 15 participants
+func createMarketConfig15Participants() MarketConfig {
+	return MarketConfig{
+		NumParticipants: 15,
+		AuctionType:     "sealed-bid-double-auction",
+
+		// Participant roles: first 7 are buyers, last 8 are sellers
+		Roles: map[int]zerocash.OrderType{
+			0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY, 5: zerocash.BUY, 6: zerocash.BUY,
+			7: zerocash.SELL, 8: zerocash.SELL, 9: zerocash.SELL, 10: zerocash.SELL, 11: zerocash.SELL, 12: zerocash.SELL, 13: zerocash.SELL, 14: zerocash.SELL,
+		},
+
+		// Initial balances for 15 participants
+		InitialCoins: []int64{
+			1000, 1100, 1200, 1300, 1400, 1500, 1600, // Buyers
+			1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, // Sellers
+		},
+		InitialEnergy: []int64{
+			50, 60, 70, 80, 90, 100, 110, // Buyers
+			120, 130, 140, 150, 160, 170, 180, 190, // Sellers
+		},
+
+		// Bid prices: buyers bid higher, sellers ask higher
+		BidPrices: []int64{
+			20, 25, 30, 35, 40, 45, 50, // Buyers
+			60, 65, 70, 75, 80, 85, 90, 95, // Sellers
+		},
+
+		// No withdrawal by default
+		WithdrawalMode: "none",
+		WithdrawAll:    false,
+		WithdrawList:   []int{},
+	}
+}
+
+// createMarketConfig20Participants creates a configuration for 20 participants
+func createMarketConfig20Participants() MarketConfig {
+	return MarketConfig{
+		NumParticipants: 20,
+		AuctionType:     "sealed-bid-double-auction",
+
+		// Participant roles: first 10 are buyers, last 10 are sellers
+		Roles: map[int]zerocash.OrderType{
+			0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY,
+			5: zerocash.BUY, 6: zerocash.BUY, 7: zerocash.BUY, 8: zerocash.BUY, 9: zerocash.BUY,
+			10: zerocash.SELL, 11: zerocash.SELL, 12: zerocash.SELL, 13: zerocash.SELL, 14: zerocash.SELL,
+			15: zerocash.SELL, 16: zerocash.SELL, 17: zerocash.SELL, 18: zerocash.SELL, 19: zerocash.SELL,
+		},
+
+		// Initial balances: increasing coins and energy for 20 participants
+		InitialCoins: []int64{
+			1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, // Buyers
+			2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, // Sellers
+		},
+		InitialEnergy: []int64{
+			50, 60, 70, 80, 90, 100, 110, 120, 130, 140, // Buyers
+			150, 160, 170, 180, 190, 200, 210, 220, 230, 240, // Sellers
+		},
+
+		// Bid prices: buyers bid higher, sellers ask higher
+		BidPrices: []int64{
+			20, 25, 30, 35, 40, 45, 50, 55, 60, 65, // Buyers (willing to pay more)
+			70, 75, 80, 85, 90, 95, 100, 105, 110, 115, // Sellers (asking for more)
+		},
+
+		// No withdrawal by default (normal market operation)
+		WithdrawalMode: "none",
+		WithdrawAll:    false,
+		WithdrawList:   []int{},
+	}
+}
+
+// createMarketConfig25Participants creates a configuration for 25 participants
+func createMarketConfig25Participants() MarketConfig {
+	return MarketConfig{
+		NumParticipants: 25,
+		AuctionType:     "sealed-bid-double-auction",
+
+		// Participant roles: first 12 are buyers, last 13 are sellers
+		Roles: map[int]zerocash.OrderType{
+			0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY, 5: zerocash.BUY,
+			6: zerocash.BUY, 7: zerocash.BUY, 8: zerocash.BUY, 9: zerocash.BUY, 10: zerocash.BUY, 11: zerocash.BUY,
+			12: zerocash.SELL, 13: zerocash.SELL, 14: zerocash.SELL, 15: zerocash.SELL, 16: zerocash.SELL, 17: zerocash.SELL,
+			18: zerocash.SELL, 19: zerocash.SELL, 20: zerocash.SELL, 21: zerocash.SELL, 22: zerocash.SELL, 23: zerocash.SELL, 24: zerocash.SELL,
+		},
+
+		// Initial balances for 25 participants
+		InitialCoins: []int64{
+			1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, // Buyers
+			2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, // Sellers
+		},
+		InitialEnergy: []int64{
+			50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, // Buyers
+			170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, // Sellers
+		},
+
+		// Bid prices: buyers bid higher, sellers ask higher
+		BidPrices: []int64{
+			20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, // Buyers
+			80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, // Sellers
+		},
+
+		// No withdrawal by default
+		WithdrawalMode: "none",
+		WithdrawAll:    false,
+		WithdrawList:   []int{},
+	}
+}
+
 // createHighDemandScenario creates a scenario where buyers have much more coins (high demand)
 func createHighDemandScenario() MarketConfig {
 	config := createDefaultMarketConfig()
@@ -193,22 +328,25 @@ type ProtocolState struct {
 
 // CircuitKeys holds all the cryptographic circuit keys needed for ZK proofs
 type CircuitKeys struct {
-	pkTx, pkReg, pkF10, pkWithdraw     groth16.ProvingKey
-	vkTx, vkReg, vkF10, vkWithdraw     groth16.VerifyingKey
-	ccsTx, ccsReg, ccsF10, ccsWithdraw constraint.ConstraintSystem
+	pkTx, pkReg, pkF10, pkF20, pkWithdraw      groth16.ProvingKey
+	vkTx, vkReg, vkF10, vkF20, vkWithdraw      groth16.VerifyingKey
+	ccsTx, ccsReg, ccsF10, ccsF20, ccsWithdraw constraint.ConstraintSystem
 }
 
 func main() {
-	fmt.Println("╔════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║          Privacy-Preserving Exchange Mechanism (PPEM)              ║")
-	fmt.Println("╚════════════════════════════════════════════════════════════════════╝")
+	fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)")
+	fmt.Println("================================================")
 	fmt.Println()
 
 	startTime := time.Now()
 
 	// STEP 1: Configure market scenario
-	config := createDefaultMarketConfig()
-	// Uncomment to try different scenarios:
+	config := createMarketConfig20Participants() // N=20 participants
+	// Uncomment to try different scenarios for benchmarking:
+	// config := createMarketConfig5Participants()  // N=5 participants
+	// config := createDefaultMarketConfig()        // N=10 participants
+	// config := createMarketConfig15Participants() // N=15 participants
+	// config := createMarketConfig25Participants() // N=25 participants
 	// config := createHighDemandScenario()
 	// config := createLowSupplyScenario()
 	// config := createEmergencyScenario()
@@ -238,36 +376,36 @@ func main() {
 	}
 
 	// PHASE 0: SETUP
-	fmt.Println("📋 SETUP")
-	fmt.Println("▔▔▔▔▔▔▔")
+	fmt.Println("SETUP PHASE")
+	fmt.Println("===========")
 	if err := setupProtocol(state); err != nil {
 		log.Fatalf("Setup failed: %v", err)
 	}
 
 	// PHASE 1: REGISTRATION
-	fmt.Println("\n📝 REGISTRATION")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	fmt.Println("\nREGISTRATION PHASE")
+	fmt.Println("==================")
 	if err := executeRegistrationPhase(state); err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
 
 	// PHASE 2: EXCHANGE
-	fmt.Println("\n🔄 EXCHANGE")
-	fmt.Println("▔▔▔▔▔▔▔▔▔")
+	fmt.Println("\nEXCHANGE PHASE")
+	fmt.Println("==============")
 	if err := executeExchangePhase(state); err != nil {
 		log.Fatalf("Exchange failed: %v", err)
 	}
 
 	// PHASE 3: FINALIZATION
-	fmt.Println("\n🔒 FINALIZATION")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	fmt.Println("\nFINALIZATION PHASE")
+	fmt.Println("==================")
 	if err := executeFinalizationPhase(state); err != nil {
 		log.Fatalf("Finalization failed: %v", err)
 	}
 
-	// PHASE 4: WITHDRAWAL (DEMO)
-	fmt.Println("\n🚨 WITHDRAWAL DEMO")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔")
+	// PHASE 4: WITHDRAWAL
+	fmt.Println("\nWITHDRAWAL PHASE")
+	fmt.Println("================")
 	executeWithdrawalDemo(state)
 
 	// PROTOCOL SUMMARY
@@ -277,10 +415,10 @@ func main() {
 
 // setupProtocol implements the initial setup phase including key generation and circuit compilation
 func setupProtocol(state *ProtocolState) error {
-	fmt.Println("🔑 Initializing system...")
+	fmt.Println("Initializing cryptographic system...")
 
 	// Step 1: Compile ZK circuits
-	fmt.Println("   → Compiling circuits...")
+	fmt.Println("  - Compiling zero-knowledge circuits...")
 	var err error
 	state.CircuitKeys, err = setupCircuitKeys()
 	if err != nil {
@@ -288,7 +426,7 @@ func setupProtocol(state *ProtocolState) error {
 	}
 
 	// Step 2: Generate auctioneer keys
-	fmt.Println("   → Generating auctioneer keys...")
+	fmt.Println("  - Generating auctioneer cryptographic keys...")
 	state.AuctioneerDHKp, err = zerocash.GenerateDHKeyPair()
 	if err != nil {
 		return fmt.Errorf("auctioneer key generation failed: %w", err)
@@ -301,7 +439,7 @@ func setupProtocol(state *ProtocolState) error {
 	state.AuctioneerECDHPub = state.AuctioneerECDHPriv.PublicKey()
 
 	// Step 3: Generate participant keys and initial balances
-	fmt.Println("   → Setting up participants...")
+	fmt.Println("  - Setting up participant keypairs...")
 	state.ParticipantDHKeys = make([]*zerocash.DHKeyPair, state.Config.NumParticipants)
 	state.ParticipantECDHKeys = make([]*ecdh.PrivateKey, state.Config.NumParticipants)
 
@@ -360,14 +498,13 @@ func setupProtocol(state *ProtocolState) error {
 		state.Ledger.CmList = append(state.Ledger.CmList, cmBase)
 	}
 
-	fmt.Printf("   ✅ Setup complete: %d participants ready\n", state.Config.NumParticipants)
+	fmt.Printf("Setup complete: %d participants initialized\n", state.Config.NumParticipants)
 	return nil
 }
 
 // executeRegistrationPhase handles participant registration
 func executeRegistrationPhase(state *ProtocolState) error {
-	fmt.Println("📝 Registering participants...")
-	fmt.Println()
+	fmt.Println("Processing participant registrations...")
 
 	// Start registration phase on the ledger
 	if err := state.Ledger.StartRegistrationPhase(); err != nil {
@@ -385,12 +522,9 @@ func executeRegistrationPhase(state *ProtocolState) error {
 			bidMeaning = fmt.Sprintf("min willing to accept %s coins/unit", state.Bids[i].String())
 		}
 
-		fmt.Printf("👤 Participant_%02d Registration (%s ORDER):\n", i+1, roleStr)
+		fmt.Printf("Participant %d (%s): ", i+1, roleStr)
 
-		fmt.Println("   → Generating keypairs...")
-		fmt.Println("   → Creating transaction...")
-		fmt.Println("   → Encrypting bid data...")
-		fmt.Println("   → Generating proof...")
+		fmt.Println("Generating keypairs, creating transaction, encrypting bid data, generating proof...")
 
 		registerResult, err := register.Register(
 			state.Participants[i],
@@ -433,35 +567,31 @@ func executeRegistrationPhase(state *ProtocolState) error {
 			return fmt.Errorf("failed to submit registration for participant %d: %w", i, err)
 		}
 
-		fmt.Printf("   ✅ Registration successful: ZK proof (%d bytes), encrypted bid data\n", len(state.RegistrationProofs[i]))
-		fmt.Printf("      💰 Initial: %s coins, %s energy, %s order: %s\n",
+		fmt.Printf("SUCCESS: ZK proof (%d bytes), %s coins, %s energy, %s\n",
+			len(state.RegistrationProofs[i]),
 			state.BaseNotes[i].Value.Coins.String(),
 			state.BaseNotes[i].Value.Energy.String(),
-			roleStr,
 			bidMeaning)
-		fmt.Println()
 	}
 
-	fmt.Printf("📊 Registration Summary: %d/%d participants successfully registered\n",
+	fmt.Printf("Registration complete: %d/%d participants registered\n",
 		state.Config.NumParticipants, state.Config.NumParticipants)
 	return nil
 }
 
 // executeExchangePhase handles the energy market auction
 func executeExchangePhase(state *ProtocolState) error {
-	fmt.Println("🔄 Running energy market auction...")
-	fmt.Println()
-
-	fmt.Println("   → Decrypting registration data...")
-	fmt.Println("   → Matching buyers and sellers...")
-	fmt.Println("   → Computing auction results...")
-	fmt.Println("   → Generating exchange proof...")
+	fmt.Println("Executing energy market auction...")
+	fmt.Println("  - Decrypting registration data...")
+	fmt.Println("  - Matching buyers and sellers...")
+	fmt.Println("  - Computing auction results...")
+	fmt.Println("  - Generating exchange proof...")
 
 	// Create exchange payloads for the auctioneer
-	exchangePayloads := make([]exchange.RegistrationPayload, N)
-	participantECDHPubKeys := make([]*ecdh.PublicKey, N)
+	exchangePayloads := make([]exchange.RegistrationPayload, state.Config.NumParticipants)
+	participantECDHPubKeys := make([]*ecdh.PublicKey, state.Config.NumParticipants)
 
-	for i := 0; i < N; i++ {
+	for i := 0; i < state.Config.NumParticipants; i++ {
 		exchangePayloads[i] = exchange.RegistrationPayload{
 			Ciphertext: state.ParticipantCAux[i],
 			PubKey: &sw_bls12377.G1Affine{
@@ -474,9 +604,22 @@ func executeExchangePhase(state *ProtocolState) error {
 	}
 
 	// Prepare DH private keys for circuit
-	participantDHPrivKeys := make([]*bls12377_fr.Element, N)
-	for i := 0; i < N; i++ {
+	participantDHPrivKeys := make([]*bls12377_fr.Element, state.Config.NumParticipants)
+	for i := 0; i < state.Config.NumParticipants; i++ {
 		participantDHPrivKeys[i] = state.ParticipantDHKeys[i].Sk
+	}
+
+	// Choose the appropriate circuit based on number of participants
+	var pk groth16.ProvingKey
+	var ccs constraint.ConstraintSystem
+
+	if state.Config.NumParticipants == 20 {
+		pk = state.CircuitKeys.pkF20
+		ccs = state.CircuitKeys.ccsF20
+	} else {
+		// Default to N=10 circuit
+		pk = state.CircuitKeys.pkF10
+		ccs = state.CircuitKeys.ccsF10
 	}
 
 	exchangeTx, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
@@ -488,8 +631,8 @@ func executeExchangePhase(state *ProtocolState) error {
 		state.AuctioneerDHKp.Pk, // REAL auctioneer public key
 		state.Ledger,
 		&zerocash.Params{},
-		state.CircuitKeys.pkF10,
-		state.CircuitKeys.ccsF10,
+		pk,
+		ccs,
 	)
 	if err != nil {
 		return fmt.Errorf("Algorithm 3 execution failed: %w", err)
@@ -498,7 +641,7 @@ func executeExchangePhase(state *ProtocolState) error {
 	state.ExchangeProof = exchangeProof
 
 	// Create individual output transactions from exchange results
-	fmt.Println("   → Creating output transactions...")
+	fmt.Println("  - Creating output transactions...")
 
 	outputTxs := make([]*zerocash.Tx, 0)
 	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
@@ -525,20 +668,20 @@ func executeExchangePhase(state *ProtocolState) error {
 	}
 
 	// Submit exchange results to ledger with individual output transactions
-	auctionInfo := []byte(`{"auction_type":"sealed_bid_double_auction","participants":10}`)
+	auctionInfo := []byte(fmt.Sprintf(`{"auction_type":"sealed_bid_double_auction","participants":%d}`, state.Config.NumParticipants))
 	err = state.Ledger.SubmitExchange(outputTxs, state.ExchangeProof, auctionInfo)
 	if err != nil {
 		return fmt.Errorf("failed to submit exchange results: %w", err)
 	}
 
-	fmt.Printf("   ✅ Auction successful: proof generated (%d bytes)\n", len(state.ExchangeProof))
-	fmt.Println("   📈 Energy market completed")
+	fmt.Printf("Auction successful: proof generated (%d bytes)\n", len(state.ExchangeProof))
+	fmt.Println("Energy market exchange completed")
 	return nil
 }
 
 // executeFinalizationPhase finalizes the protocol
 func executeFinalizationPhase(state *ProtocolState) error {
-	fmt.Println("📋 Finalizing ledger state...")
+	fmt.Println("Finalizing ledger state...")
 
 	// Close the auction and merge temporary lists to permanent
 	if err := state.Ledger.CloseAuction(); err != nil {
@@ -547,11 +690,11 @@ func executeFinalizationPhase(state *ProtocolState) error {
 
 	// Save final ledger state
 	if err := state.Ledger.SaveToFile("ledger_final.json"); err != nil {
-		fmt.Printf("   ⚠️  Warning: Could not save final ledger: %v\n", err)
+		fmt.Printf("Warning: Could not save final ledger: %v\n", err)
 	}
 
-	fmt.Println("   ✅ Ledger finalized")
-	fmt.Printf("   📊 Final state: %d commitments, %d serial numbers, %d transactions\n",
+	fmt.Println("Ledger finalized")
+	fmt.Printf("Final state: %d commitments, %d serial numbers, %d transactions\n",
 		len(state.Ledger.CmList), len(state.Ledger.SnList), len(state.Ledger.TxList))
 
 	return nil
@@ -559,47 +702,70 @@ func executeFinalizationPhase(state *ProtocolState) error {
 
 // executeWithdrawalDemo demonstrates emergency withdrawal functionality
 func executeWithdrawalDemo(state *ProtocolState) {
-	fmt.Println("🚨 Testing emergency withdrawal...")
-	fmt.Println()
-	fmt.Println("💡 Note: This allows participants to recover funds if the auctioneer fails")
-	fmt.Println()
+	// Check withdrawal mode from configuration
+	if state.Config.WithdrawalMode == "none" {
+		fmt.Println("WITHDRAWAL PHASE: Skipped (no withdrawals configured)")
+		return
+	}
+
+	fmt.Println("WITHDRAWAL PHASE")
+	fmt.Println("=================")
 
 	// Setup withdrawal circuit keys
 	withdrawalKeys, err := setupWithdrawalKeys()
 	if err != nil {
-		fmt.Printf("   ❌ Failed to setup withdrawal keys: %v\n", err)
+		fmt.Printf("ERROR: Failed to setup withdrawal keys: %v\n", err)
 		return
 	}
 
-	// Demonstrate withdrawal for first 3 participants
-	successCount := 0
-	for i := 0; i < 3; i++ {
-		fmt.Printf("👤 Participant_%02d Emergency Withdrawal:\n", i+1)
+	// Determine which participants should withdraw
+	var participantsToWithdraw []int
+	if state.Config.WithdrawAll {
+		// All participants withdraw
+		participantsToWithdraw = make([]int, state.Config.NumParticipants)
+		for i := 0; i < state.Config.NumParticipants; i++ {
+			participantsToWithdraw[i] = i
+		}
+	} else if len(state.Config.WithdrawList) > 0 {
+		// Specific participants withdraw
+		participantsToWithdraw = state.Config.WithdrawList
+	} else {
+		// No withdrawals
+		fmt.Println("No withdrawals configured")
+		return
+	}
 
-		fmt.Println("   → Using registration data...")
-		fmt.Println("   → Computing withdrawal transaction...")
-		fmt.Println("   → Generating withdrawal proof...")
+	fmt.Printf("Processing %d withdrawal(s)...\n", len(participantsToWithdraw))
+
+	successCount := 0
+	for _, participantID := range participantsToWithdraw {
+		if participantID >= state.Config.NumParticipants {
+			fmt.Printf("ERROR: Invalid participant ID %d\n", participantID)
+			continue
+		}
+
+		fmt.Printf("Participant %d: ", participantID+1)
 
 		// Use the note created during registration
-		registrationTx := state.RegistrationTxs[i] // tx^in from registration
-		noteToWithdraw := registrationTx.NewNote   // n^in: The actual note sent to auctioneer
-		skIn := state.ParticipantSkIn[i]           // sk^in from registration
+		registrationTx := state.RegistrationTxs[participantID]
+		noteToWithdraw := registrationTx.NewNote
+		skIn := state.ParticipantSkIn[participantID]
 
 		// Create withdrawal note data structures
 		inNote := withdraw.Note{
 			Coins:  noteToWithdraw.Value.Coins,
 			Energy: noteToWithdraw.Value.Energy,
 			Pk:     new(big.Int).SetBytes(noteToWithdraw.PkOwner),
-			Rho:    new(big.Int).SetBytes(noteToWithdraw.Rho),  // n^in.rho (correct!)
-			R:      new(big.Int).SetBytes(noteToWithdraw.Rand), // n^in.r (correct!)
-			Cm:     new(big.Int).SetBytes(noteToWithdraw.Cm),   // n^in.cm (correct!)
+			Rho:    new(big.Int).SetBytes(noteToWithdraw.Rho),
+			R:      new(big.Int).SetBytes(noteToWithdraw.Rand),
+			Cm:     new(big.Int).SetBytes(noteToWithdraw.Cm),
 		}
 
 		// Create output note (participant gets their funds back)
 		outNote := withdraw.Note{
-			Coins:  new(big.Int).Set(noteToWithdraw.Value.Coins),  // Same coins from n^in
-			Energy: new(big.Int).Set(noteToWithdraw.Value.Energy), // Same energy from n^in
-			Pk:     state.ParticipantPkOut[i],                     // pk^out from registration
+			Coins:  new(big.Int).Set(noteToWithdraw.Value.Coins),
+			Energy: new(big.Int).Set(noteToWithdraw.Value.Energy),
+			Pk:     state.ParticipantPkOut[participantID],
 			Rho:    new(big.Int).SetBytes(zerocash.RandomBytesPublic(32)),
 			R:      new(big.Int).SetBytes(zerocash.RandomBytesPublic(32)),
 		}
@@ -615,17 +781,17 @@ func executeWithdrawalDemo(state *ProtocolState) {
 
 		// Use the same ciphertext from registration
 		cipherAux := [5]*big.Int{
-			state.ParticipantCAux[i][0], // pkOut (encrypted)
-			state.ParticipantCAux[i][1], // skIn (encrypted)
-			state.ParticipantCAux[i][2], // bid (encrypted)
-			state.ParticipantCAux[i][3], // coins (encrypted)
-			state.ParticipantCAux[i][4], // energy (encrypted)
+			state.ParticipantCAux[participantID][0],
+			state.ParticipantCAux[participantID][1],
+			state.ParticipantCAux[participantID][2],
+			state.ParticipantCAux[participantID][3],
+			state.ParticipantCAux[participantID][4],
 		}
 
 		// Execute withdrawal
 		sharedSecretGnark := sw_bls12377.G1Affine{
-			X: state.SharedSecrets[i].X.String(),
-			Y: state.SharedSecrets[i].Y.String(),
+			X: state.SharedSecrets[participantID].X.String(),
+			Y: state.SharedSecrets[participantID].Y.String(),
 		}
 		withdrawTx, withdrawProof, err := withdraw.Withdraw(
 			inNote,
@@ -633,33 +799,31 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			outNote,
 			pkT,
 			cipherAux,
-			state.Bids[i],
-			sharedSecretGnark, // DH shared secret from registration
+			state.Bids[participantID],
+			sharedSecretGnark,
 			withdrawalKeys.pkWithdraw,
 			withdrawalKeys.ccsWithdraw,
 		)
 
 		if err != nil {
-			fmt.Printf("   ❌ Withdrawal failed: %v\n", err)
-			state.WithdrawalResults[i] = false
+			fmt.Printf("FAILED: %v\n", err)
+			state.WithdrawalResults[participantID] = false
 		} else {
 			// Verify the withdrawal proof
 			err = withdraw.VerifyWithdraw(withdrawTx, withdrawProof, withdrawalKeys.vkWithdraw)
 			if err != nil {
-				fmt.Printf("   ❌ Withdrawal verification failed: %v\n", err)
-				state.WithdrawalResults[i] = false
+				fmt.Printf("VERIFICATION FAILED: %v\n", err)
+				state.WithdrawalResults[participantID] = false
 			} else {
-				fmt.Printf("   ✅ Emergency withdrawal successful!\n")
-				fmt.Printf("      💰 Recovered: %s coins, %s energy\n",
+				fmt.Printf("SUCCESS: Recovered %s coins, %s energy\n",
 					outNote.Coins.String(), outNote.Energy.String())
-				state.WithdrawalResults[i] = true
+				state.WithdrawalResults[participantID] = true
 				successCount++
 			}
 		}
-		fmt.Println()
 	}
 
-	fmt.Printf("📊 Withdrawal Summary: %d/3 emergency withdrawals successful\n", successCount)
+	fmt.Printf("Withdrawal Summary: %d/%d successful\n", successCount, len(participantsToWithdraw))
 }
 
 // Helper functions
@@ -699,6 +863,16 @@ func setupCircuitKeys() (*CircuitKeys, error) {
 		return nil, err
 	}
 
+	var circuitF20 exchange.CircuitTxF20
+	keys.ccsF20, err = frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuitF20)
+	if err != nil {
+		return nil, err
+	}
+	keys.pkF20, keys.vkF20, err = groth16.Setup(keys.ccsF20)
+	if err != nil {
+		return nil, err
+	}
+
 	return keys, nil
 }
 
@@ -732,54 +906,53 @@ func computeMimcCommitment(coins, energy, pk, rho, rand *big.Int) *big.Int {
 
 // printProtocolSummary prints a summary of the protocol execution
 func printProtocolSummary(state *ProtocolState, totalTime time.Duration) {
-	fmt.Println("\n╔════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                          EXECUTION SUMMARY                        ║")
-	fmt.Println("╚════════════════════════════════════════════════════════════════════╝")
+	fmt.Println("\nEXECUTION SUMMARY")
+	fmt.Println("=================")
 	fmt.Println()
 
-	fmt.Printf("⏱️  Total Time: %v\n", totalTime)
-	fmt.Printf("👥 Participants: %d\n", N)
-	fmt.Printf("🏛️  Auctioneer: Configured\n")
+	fmt.Printf("Total execution time: %v\n", totalTime)
+	fmt.Printf("Participants: %d\n", state.Config.NumParticipants)
+	fmt.Printf("Auctioneer: Configured\n")
 	fmt.Println()
 
-	fmt.Println("📊 RESULTS:")
-	fmt.Println("▔▔▔▔▔▔▔▔▔▔")
+	fmt.Println("RESULTS:")
+	fmt.Println("--------")
 
 	// Registration Results
 	registrationSuccess := 0
-	for i := 0; i < N; i++ {
+	for i := 0; i < state.Config.NumParticipants; i++ {
 		if len(state.RegistrationProofs[i]) > 0 {
 			registrationSuccess++
 		}
 	}
-	fmt.Printf("✅ Registration: %d/%d successful\n", registrationSuccess, N)
-	fmt.Printf("   → ZK proofs generated: %d\n", registrationSuccess)
+	fmt.Printf("Registration: %d/%d successful\n", registrationSuccess, state.Config.NumParticipants)
+	fmt.Printf("  ZK proofs generated: %d\n", registrationSuccess)
 
 	// Exchange Results
 	exchangeSuccess := 0
 	if len(state.ExchangeProof) > 0 {
 		exchangeSuccess = 1
 	}
-	fmt.Printf("✅ Exchange: %d/1 successful\n", exchangeSuccess)
-	fmt.Printf("   → Proof size: %d bytes\n", len(state.ExchangeProof))
+	fmt.Printf("Exchange: %d/1 successful\n", exchangeSuccess)
+	fmt.Printf("  Proof size: %d bytes\n", len(state.ExchangeProof))
 
 	// Withdrawal Results
 	withdrawalSuccess := 0
-	for i := 0; i < 3; i++ {
+	for i := 0; i < state.Config.NumParticipants; i++ {
 		if state.WithdrawalResults[i] {
 			withdrawalSuccess++
 		}
 	}
-	fmt.Printf("✅ Withdrawal: %d/3 tests successful\n", withdrawalSuccess)
+	fmt.Printf("Withdrawal: %d/%d successful\n", withdrawalSuccess, state.Config.NumParticipants)
 	fmt.Println()
 
-	fmt.Printf("📚 Final Ledger State:\n")
-	fmt.Printf("   → Commitments: %d entries\n", len(state.Ledger.CmList))
-	fmt.Printf("   → Serial Numbers: %d entries\n", len(state.Ledger.SnList))
-	fmt.Printf("   → Transactions: %d entries\n", len(state.Ledger.TxList))
+	fmt.Printf("Final ledger state:\n")
+	fmt.Printf("  Commitments: %d entries\n", len(state.Ledger.CmList))
+	fmt.Printf("  Serial Numbers: %d entries\n", len(state.Ledger.SnList))
+	fmt.Printf("  Transactions: %d entries\n", len(state.Ledger.TxList))
 	fmt.Println()
 
-	fmt.Println("🏆 Privacy-Preserving Energy Market Protocol: COMPLETED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════")
+	fmt.Println("Privacy-Preserving Energy Market Protocol: COMPLETED")
+	fmt.Println("====================================================")
 	fmt.Println()
 }

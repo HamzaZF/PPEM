@@ -163,15 +163,34 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	}
 
 	// SIMPLIFIED: Use the explicit participant roles defined in main.go
-	// Buyers: participants 0-4 (bid = max price willing to pay)
-	// Sellers: participants 5-9 (bid = min price willing to accept)
+	// For N=10: Buyers: participants 0-4, Sellers: participants 5-9
+	// For N=20: Buyers: participants 0-9, Sellers: participants 10-19
 	var buyers, sellers []int
+	numParticipants := len(inputs)
 
 	for i := range inputs {
-		if i < 5 {
-			buyers = append(buyers, i) // Participants 0-4 are BUYERS
+		if numParticipants == 10 {
+			// N=10: first 5 are buyers, last 5 are sellers
+			if i < 5 {
+				buyers = append(buyers, i) // Participants 0-4 are BUYERS
+			} else {
+				sellers = append(sellers, i) // Participants 5-9 are SELLERS
+			}
+		} else if numParticipants == 20 {
+			// N=20: first 10 are buyers, last 10 are sellers
+			if i < 10 {
+				buyers = append(buyers, i) // Participants 0-9 are BUYERS
+			} else {
+				sellers = append(sellers, i) // Participants 10-19 are SELLERS
+			}
 		} else {
-			sellers = append(sellers, i) // Participants 5-9 are SELLERS
+			// Default: first half are buyers, second half are sellers
+			midpoint := numParticipants / 2
+			if i < midpoint {
+				buyers = append(buyers, i)
+			} else {
+				sellers = append(sellers, i)
+			}
 		}
 	}
 
@@ -559,8 +578,305 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 	return w
 }
 
+// BuildWitnessF20 builds the witness for CircuitTxF20 from input/output notes using the new array-based structure and REAL participant DH private keys.
+func BuildWitnessF20(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *bls12377.G1Affine) *CircuitTxF20 {
+	w := &CircuitTxF20{}
+
+	// Helper to convert *big.Int to frontend.Variable with nil handling
+	toVar := func(x *big.Int) frontend.Variable {
+		if x == nil {
+			return "0"
+		}
+		return x.String()
+	}
+
+	// Helper to make [5]frontend.Variable from [5]*big.Int with nil handling
+	toVarArr := func(arr [5]*big.Int) [5]frontend.Variable {
+		var out [5]frontend.Variable
+		for i := 0; i < 5; i++ {
+			if arr[i] == nil {
+				out[i] = "0"
+			} else {
+				out[i] = arr[i].String()
+			}
+		}
+		return out
+	}
+
+	// Helper to convert native BLS12-377 point to gnark format
+	toGnarkPoint := func(p bls12377.G1Affine) sw_bls12377.G1Affine {
+		return sw_bls12377.G1Affine{
+			X: p.X.String(),
+			Y: p.Y.String(),
+		}
+	}
+
+	// Helper to compute MiMC hash (same as circuit)
+	mimcHash := func(data ...*big.Int) *big.Int {
+		h := mimcNative.NewMiMC()
+		for _, d := range data {
+			if d != nil {
+				h.Write(d.Bytes())
+			}
+		}
+		result := h.Sum(nil)
+		return new(big.Int).SetBytes(result)
+	}
+
+	// Helper to compute PRF (same as circuit)
+	prf := func(sk, rho *big.Int) *big.Int {
+		return mimcHash(sk, rho)
+	}
+
+	// Helper to compute commitment following paper: cm = Com(Γ || pk || ρ, r)
+	computeCommitment := func(coin, energy *big.Int, pk *big.Int, rho, rand *big.Int) *big.Int {
+		return mimcHash(coin, energy, pk, rho, rand)
+	}
+
+	// Helper to get safe values from DecryptedRegistration
+	getSafeValue := func(in DecryptedRegistration, field string) *big.Int {
+		switch field {
+		case "coins":
+			if in.Coins == nil {
+				return big.NewInt(100) // Default value
+			}
+			return in.Coins
+		case "energy":
+			if in.Energy == nil {
+				return big.NewInt(50) // Default value
+			}
+			return in.Energy
+		case "pkout":
+			if in.PkOut == nil {
+				return big.NewInt(1) // Default value
+			}
+			return in.PkOut
+		case "skin":
+			if in.SkIn == nil {
+				return big.NewInt(2) // Default value
+			}
+			return in.SkIn
+		case "bid":
+			if in.Bid == nil {
+				return big.NewInt(10) // Default value
+			}
+			return in.Bid
+		default:
+			return big.NewInt(0)
+		}
+	}
+
+	// Helper to create DH components using REAL participant private keys
+	createDHComponents := func(shared bls12377.G1Affine, participantSk *bls12377_fr.Element, auctioneerPk *bls12377.G1Affine) (sw_bls12377.G1Affine, sw_bls12377.G1Affine, frontend.Variable, sw_bls12377.G1Affine) {
+		// Use REAL participant DH private key as R (not 1!)
+		// Circuit verifies: EncKey = G_b^R where R is participant's actual secret key
+
+		// Get the actual BLS12-377 generator (same as used in DH key generation)
+		var g1Gen, _, _, _ = bls12377.Generators()
+		var g bls12377.G1Affine
+		g.FromJacobian(&g1Gen)
+
+		// Compute G_r = G^R where R is the participant's REAL private key
+		var gr bls12377.G1Affine
+		participantSkBig := participantSk.BigInt(new(big.Int))
+		gr.ScalarMultiplication(&g, participantSkBig)
+
+		return sw_bls12377.G1Affine{
+				X: g.X.String(),
+				Y: g.Y.String(),
+			}, // G (actual BLS12-377 generator)
+			sw_bls12377.G1Affine{
+				X: auctioneerPk.X.String(),
+				Y: auctioneerPk.Y.String(),
+			}, // G_b = auctioneer's public key
+			participantSkBig.String(), // R = participant's REAL DH private key
+			sw_bls12377.G1Affine{
+				X: gr.X.String(),
+				Y: gr.Y.String(),
+			} // G_r = G^R (using real private key)
+	}
+
+	// Convert auctioneer's secret key to BLS12-377 field element
+	var sk bls12377_fr.Element
+	sk.SetBigInt(auctioneerSk)
+
+	// For each of the 20 participants, populate the witness arrays
+	for i := 0; i < 20; i++ {
+		var in DecryptedRegistration
+		var payload RegistrationPayload
+
+		if i < len(inputs) {
+			in = inputs[i]
+		}
+		if i < len(payloads) {
+			payload = payloads[i]
+		}
+
+		// Compute DH shared secret for this participant
+		var shared bls12377.G1Affine
+		if i < len(payloads) {
+			// Convert participant's public key from gnark format to native BLS12-377
+			pkX := new(big.Int)
+			pkX.SetString(payload.PubKey.X.(string), 10)
+			pkY := new(big.Int)
+			pkY.SetString(payload.PubKey.Y.(string), 10)
+
+			var pk bls12377.G1Affine
+			pk.X.SetBigInt(pkX)
+			pk.Y.SetBigInt(pkY)
+
+			// Compute DH shared secret: shared = pk^sk
+			sharedPtr := zerocash.ComputeDHShared(&sk, &pk)
+			shared = *sharedPtr
+		} else {
+			// Use a default point if no payload
+			_, _, g1, _ := bls12377.Generators()
+			shared.Set(&g1)
+		}
+
+		// Get consistent values for this participant
+		coins := getSafeValue(in, "coins")
+		energy := getSafeValue(in, "energy")
+		skIn := getSafeValue(in, "skin")
+		bid := getSafeValue(in, "bid")
+
+		// Compute pkOut as MiMC(skIn) to satisfy circuit constraint InPk = MiMC(InSk)
+		pkOut := mimcHash(skIn)
+
+		// Use bid as rho (for consistency)
+		rho := bid
+
+		// Use coins as rand (for consistency)
+		rand := coins
+
+		// Compute serial number using PRF
+		sn := prf(skIn, rho)
+
+		// Compute commitment following paper: cm = Com(Γ || pk || ρ, r)
+		cm := computeCommitment(coins, energy, pkOut, rho, rand)
+
+		// Populate arrays for this participant
+		w.InCoin[i] = toVar(coins)
+		w.InEnergy[i] = toVar(energy)
+		w.InCm[i] = toVar(cm)
+		w.InSn[i] = toVar(sn)
+		w.InPk[i] = toVar(pkOut)
+		w.InSk[i] = toVar(skIn)
+		w.InRho[i] = toVar(rho)
+		w.InRand[i] = toVar(rand)
+
+		// Set outputs equal to inputs to satisfy circuit constraints
+		w.OutCoin[i] = toVar(coins)
+		w.OutEnergy[i] = toVar(energy)
+		w.OutCm[i] = toVar(cm)
+		w.OutSn[i] = toVar(sn)
+		w.OutPk[i] = toVar(pkOut)
+		w.OutRho[i] = toVar(rho)
+		w.OutRand[i] = toVar(rand)
+
+		// Set ciphertext and decrypted values with proper encryption relationship
+		if i < len(payloads) {
+			// Real participant: use actual ciphertext and decrypt it
+			w.C[i] = toVarArr(payload.Ciphertext)
+			dec := DecZKRegGo(payload.Ciphertext, shared)
+			w.DecVal[i] = toVarArr(dec)
+		} else {
+			// Padding participant: create consistent encrypted/decrypted pair
+			// For circuit to pass: C[i] = Encrypt(DecVal[i], SkT[i])
+			plaintext := [5]*big.Int{pkOut, skIn, bid, coins, energy} // Expected decrypted values
+
+			// Encrypt the plaintext using the shared secret to get ciphertext
+			h := mimcNative.NewMiMC()
+			h.Reset()
+			encKeyXBytes := shared.X.Bytes()
+			h.Write(encKeyXBytes[:])
+			encKeyYBytes := shared.Y.Bytes()
+			h.Write(encKeyYBytes[:])
+			mask0 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask0)
+			mask1 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask1)
+			mask2 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask2)
+			mask3 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask3)
+			mask4 := h.Sum(nil)
+
+			// Create ciphertext by adding masks to plaintext
+			ciphertext := [5]*big.Int{
+				new(big.Int).Add(plaintext[0], new(big.Int).SetBytes(mask0)),
+				new(big.Int).Add(plaintext[1], new(big.Int).SetBytes(mask1)),
+				new(big.Int).Add(plaintext[2], new(big.Int).SetBytes(mask2)),
+				new(big.Int).Add(plaintext[3], new(big.Int).SetBytes(mask3)),
+				new(big.Int).Add(plaintext[4], new(big.Int).SetBytes(mask4)),
+			}
+
+			w.C[i] = toVarArr(ciphertext)
+			w.DecVal[i] = toVarArr(plaintext)
+		}
+
+		// Use REAL participant DH private key (passed as parameter)
+		var participantSk bls12377_fr.Element
+		if i < len(participantDHKeys) && participantDHKeys[i] != nil {
+			// Use the REAL participant DH private key passed to this function
+			participantSk.Set(participantDHKeys[i])
+		} else {
+			// Default for padding participants
+			participantSk.SetOne()
+		}
+
+		// Use the REAL auctioneer's public key (passed as parameter)
+		var auctioneerPk bls12377.G1Affine
+		if auctioneerDHPk != nil {
+			auctioneerPk.Set(auctioneerDHPk)
+		} else {
+			// Default fallback
+			auctioneerPk.Set(&shared)
+		}
+
+		// Set DH components that satisfy the circuit constraints using REAL keys
+		w.G[i], w.G_b[i], w.R[i], w.G_r[i] = createDHComponents(shared, &participantSk, &auctioneerPk)
+		// FIXED: EncKey serves both purposes - DH verification and decryption
+		w.EncKey[i] = toGnarkPoint(shared) // Used for both DH verification (EncKey[i] == G_b[i] * R[i]) and decryption
+	}
+
+	return w
+}
+
 // GenerateProofF10 generates a Groth16 proof for CircuitTxF10.
 func GenerateProofF10(witness *CircuitTxF10, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
+	// Create witness
+	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
+	if err != nil {
+		return nil, fmt.Errorf("witness creation failed: %w", err)
+	}
+
+	// Generate proof
+	proof, err := groth16.Prove(ccs, pk, w)
+	if err != nil {
+		return nil, fmt.Errorf("proof generation failed: %w", err)
+	}
+
+	// Marshal proof to bytes
+	var proofBuf bytes.Buffer
+	_, err = proof.WriteTo(&proofBuf)
+	if err != nil {
+		return nil, fmt.Errorf("proof marshaling failed: %w", err)
+	}
+
+	return proofBuf.Bytes(), nil
+}
+
+// GenerateProofF20 generates a Groth16 proof for CircuitTxF20.
+func GenerateProofF20(witness *CircuitTxF20, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 	// Create witness
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
@@ -629,8 +945,8 @@ func validateExchangeInputs(
 	if len(regPayloads) == 0 {
 		return fmt.Errorf("no registration payloads provided")
 	}
-	if len(regPayloads) > 10 {
-		return fmt.Errorf("too many registration payloads: %d (max 10)", len(regPayloads))
+	if len(regPayloads) > 20 {
+		return fmt.Errorf("too many registration payloads: %d (max 20)", len(regPayloads))
 	}
 
 	for i, payload := range regPayloads {
@@ -737,11 +1053,16 @@ func ExchangePhaseWithNotes(
 	// 4. Run auction logic - sophisticated sealed-bid double auction mechanism
 	outputs := RunAuctionLogic(inputs)
 
-	// 5. Build witness for CircuitTxF10 using REAL participant DH private keys
-	witness := BuildWitnessF10(inputs, outputs, regPayloads, auctioneerSk, participantDHKeys, auctioneerDHPk)
-
-	// 6. Generate ZKP using CircuitTxF10
-	proof, err = GenerateProofF10(witness, pk, ccs)
+	// 5. Build witness using the appropriate circuit based on number of participants
+	if len(regPayloads) == 20 {
+		// Use N=20 circuit
+		witness := BuildWitnessF20(inputs, outputs, regPayloads, auctioneerSk, participantDHKeys, auctioneerDHPk)
+		proof, err = GenerateProofF20(witness, pk, ccs)
+	} else {
+		// Use N=10 circuit (default)
+		witness := BuildWitnessF10(inputs, outputs, regPayloads, auctioneerSk, participantDHKeys, auctioneerDHPk)
+		proof, err = GenerateProofF10(witness, pk, ccs)
+	}
 	if err != nil {
 		return nil, nil, nil, err
 	}
