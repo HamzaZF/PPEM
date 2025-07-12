@@ -359,6 +359,7 @@ type ProtocolState struct {
 	RegistrationProofs [][]byte
 	ExchangeProof      []byte
 	WithdrawalResults  []bool
+	WithdrawalAttempts int // Track number of actual withdrawal attempts
 
 	// Algorithm 2 outputs (Registration keypairs that must be stored)
 	ParticipantSkIn  []*big.Int    // sk^in: Secret keys for notes TO auctioneer
@@ -758,6 +759,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 	// Check withdrawal mode from configuration
 	if state.Config.WithdrawalMode == "none" {
 		fmt.Println("WITHDRAWAL PHASE: Skipped (no withdrawals configured)")
+		state.WithdrawalAttempts = 0
 		return
 	}
 
@@ -785,10 +787,12 @@ func executeWithdrawalDemo(state *ProtocolState) {
 	} else {
 		// No withdrawals
 		fmt.Println("No withdrawals configured")
+		state.WithdrawalAttempts = 0
 		return
 	}
 
 	fmt.Printf("Processing %d withdrawal(s)...\n", len(participantsToWithdraw))
+	state.WithdrawalAttempts = len(participantsToWithdraw)
 
 	successCount := 0
 	for _, participantID := range participantsToWithdraw {
@@ -985,7 +989,11 @@ func printProtocolSummary(state *ProtocolState, totalTime time.Duration) {
 			withdrawalSuccess++
 		}
 	}
-	fmt.Printf("Withdrawal: %d/%d successful\n", withdrawalSuccess, state.Config.NumParticipants)
+	if state.WithdrawalAttempts == 0 {
+		fmt.Printf("Withdrawal: skipped (no withdrawals configured)\n")
+	} else {
+		fmt.Printf("Withdrawal: %d/%d successful\n", withdrawalSuccess, state.WithdrawalAttempts)
+	}
 	fmt.Println()
 
 	fmt.Printf("Final ledger state:\n")
