@@ -1,14 +1,14 @@
 // circuit.go - Circuit for the auction phase (exchange) of the protocol.
 //
-// Defines dynamic circuits for any N participants, enforcing cryptographic consistency
-// (decryption, PRF, commitments, EC operations) and basic auction constraints.
+// This file defines the zero-knowledge circuit for the auction (exchange) phase of the PPEM protocol.
+// It enforces cryptographic consistency (decryption, PRF, commitments, EC operations) and basic auction constraints.
 //
-// AUCTION CONSTRAINTS:
+// Auction constraints:
 // - First N/2 participants are buyers (sorted descending by bid)
 // - Last N/2 participants are sellers (sorted ascending by ask)
 // - DecVal[i][2] contains the bid/ask price for participant i
 //
-// WARNING: This circuit enforces sorting constraints but does NOT implement the full auction matching logic.
+// WARNING: This circuit enforces sorting and basic trading constraints but does NOT implement a full double auction.
 
 package exchange
 
@@ -18,10 +18,20 @@ import (
 	"github.com/consensys/gnark/std/hash/mimc"
 )
 
-// TRADING_VOLUME is the hardcoded trading volume for the simplified auction
+// TRADING_VOLUME is the hardcoded trading volume for the simplified auction.
+// All trades are for this fixed quantity of energy.
 const TRADING_VOLUME = 10
 
-// DecZKReg decrypts a registration ciphertext in the circuit using MiMC-based mask chain.
+// DecZKReg decrypts a registration ciphertext in the circuit using a MiMC-based mask chain.
+// This function mimics the off-circuit decryption logic for registration payloads.
+//
+// Parameters:
+//   - api: gnark frontend API
+//   - c: ciphertext array (length 5)
+//   - encKey: shared DH key (G1Affine)
+//
+// Returns:
+//   - [5]frontend.Variable: decrypted values (pkOut, skIn, bid/ask, coins, energy)
 func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affine) [5]frontend.Variable {
 	hasher, _ := mimc.NewMiMC(api)
 	hasher.Reset()
@@ -55,6 +65,15 @@ func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affi
 }
 
 // PRF implements a pseudo-random function using MiMC hash in the circuit.
+// Used for serial number computation.
+//
+// Parameters:
+//   - api: gnark frontend API
+//   - sk: secret key
+//   - rho: randomizer
+//
+// Returns:
+//   - frontend.Variable: PRF output
 func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 	hasher, _ := mimc.NewMiMC(api)
 	hasher.Write(sk)
@@ -63,14 +82,19 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 }
 
 // CircuitTxFN represents a dynamic circuit for N coins/participants in the auction phase.
-// This circuit can be generated for any number of participants.
+// This circuit can be generated for any number of participants (N must be even).
 //
-// Auction Structure:
-// - First N/2 participants (indices 0 to N/2-1) are BUYERS
-// - Last N/2 participants (indices N/2 to N-1) are SELLERS
-// - DecVal[i][2] represents the bid (for buyers) or ask (for sellers) price
-// - Buyers must be sorted in DESCENDING order (highest bid first)
-// - Sellers must be sorted in ASCENDING order (lowest ask first)
+// Fields:
+//   - N: number of participants
+//   - InCoin, InEnergy, ...: input arrays for each participant
+//   - OutCoin, OutEnergy, ...: output arrays for each participant
+//   - C, DecVal: encrypted and decrypted registration data
+//   - R, G, G_b, G_r, EncKey: Diffie-Hellman parameters for each participant
+//
+// Auction structure:
+//   - First N/2 participants are buyers (indices 0 to N/2-1)
+//   - Last N/2 participants are sellers (indices N/2 to N-1)
+//   - DecVal[i][2] is the bid (buyers) or ask (sellers)
 type CircuitTxFN struct {
 	// Number of participants this circuit supports (must be even)
 	N int
@@ -104,8 +128,8 @@ type CircuitTxFN struct {
 	EncKey []sw_bls12377.G1Affine // DH shared secret: used for both decryption and DH verification
 }
 
-// NewCircuitTxFN creates a new dynamic circuit for N participants
-// N must be even: first N/2 participants are buyers, last N/2 are sellers
+// NewCircuitTxFN creates a new dynamic circuit for N participants.
+// N must be even: first N/2 are buyers, last N/2 are sellers.
 func NewCircuitTxFN(n int) *CircuitTxFN {
 	if n <= 0 {
 		panic("CircuitTxFN: N must be positive")
@@ -154,6 +178,16 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 }
 
 // Define implements the constraints for CircuitTxFN using dynamic arrays and for loops.
+// This is the main circuit logic for the auction phase.
+//
+// Constraints enforced:
+//   - Decrypt registration data and check consistency
+//   - Verify serial number computation
+//   - Check output commitments
+//   - Verify DH encryption constraints
+//   - Enforce public key derivation
+//   - Enforce sorting of buyers/sellers
+//   - Enforce trading logic: buyers with bid >= clearing price and sellers with ask <= clearing price trade at fixed volume
 func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Process all N coins using a for loop
 	for coin := 0; coin < c.N; coin++ {
@@ -463,6 +497,7 @@ type CircuitTxF20 struct {
 }
 
 // Define implements the constraints for CircuitTxF10 using arrays and for loops.
+// Only enforces cryptographic consistency, not auction logic.
 func (c *CircuitTxF10) Define(api frontend.API) error {
 	// Process all 10 coins using a for loop
 	for coin := 0; coin < 10; coin++ {
@@ -514,6 +549,7 @@ func (c *CircuitTxF10) Define(api frontend.API) error {
 }
 
 // Define implements the constraints for CircuitTxF20 using arrays and for loops.
+// Only enforces cryptographic consistency, not auction logic.
 func (c *CircuitTxF20) Define(api frontend.API) error {
 	// Process all 20 coins using a for loop
 	for coin := 0; coin < 20; coin++ {

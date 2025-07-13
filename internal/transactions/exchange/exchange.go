@@ -1,7 +1,7 @@
 // exchange.go - Auction phase logic for the protocol (Algorithm 3, without ZKP-enforced auction logic).
 //
-// Implements the exchange phase: decrypts registration payloads, runs auction logic (off-circuit),
-// constructs output notes, builds the witness, and generates the ZKP using CircuitTxF10.
+// This file implements the exchange phase: decrypts registration payloads, runs auction logic (off-circuit),
+// constructs output notes, builds the witness, and generates the ZKP using CircuitTxF10 or CircuitTxFN.
 //
 // WARNING: The ZKP only proves cryptographic consistency, not the correctness of the auction computation.
 
@@ -28,24 +28,28 @@ import (
 	"implementation/internal/zerocash"
 )
 
-// RegistrationPayload represents decrypted registration data from a participant
+// RegistrationPayload represents a participant's encrypted registration data for the auction phase.
+// Contains the ciphertext (encrypted registration fields), the participant's public key (for DH),
+// and optionally the encrypted note data from CreateTx.
 type RegistrationPayload struct {
 	Ciphertext [5]*big.Int           // (pkOut, skIn, bid, coins, energy)
 	PubKey     *sw_bls12377.G1Affine // Participant's public key (for DH)
 	TxNoteData []byte                // Encrypted note data from CreateTx (new field)
 }
 
-// DecryptedRegistration holds the decrypted data from registration
+// DecryptedRegistration holds the decrypted registration data for a participant.
+// This is the canonical form used for auction logic and witness generation.
 type DecryptedRegistration struct {
-	PkOut    *big.Int
-	SkIn     *big.Int
-	Bid      *big.Int
-	Coins    *big.Int
-	Energy   *big.Int
-	NoteData *zerocash.Note // Decrypted note from CreateTx (new field)
+	PkOut    *big.Int       // Output public key
+	SkIn     *big.Int       // Input secret key
+	Bid      *big.Int       // Bid (for buyers) or ask (for sellers)
+	Coins    *big.Int       // Coin balance
+	Energy   *big.Int       // Energy balance
+	NoteData *zerocash.Note // Decrypted note from CreateTx (optional)
 }
 
-// DecryptAllRegistrations decrypts all registration payloads using the auctioneer's private key
+// DecryptAllRegistrations decrypts all registration payloads using the auctioneer's private key.
+// Returns a slice of DecryptedRegistration for each participant.
 func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.Int) ([]DecryptedRegistration, error) {
 	results := make([]DecryptedRegistration, len(payloads))
 
@@ -86,7 +90,8 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 	return results, nil
 }
 
-// DecryptTransactionNotes decrypts the note data from transactions using permanent ECDH keys
+// DecryptTransactionNotes decrypts the note data from transactions using permanent ECDH keys.
+// Returns a slice of DecryptedRegistration with only the NoteData, Coins, and Energy fields set.
 func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivKey *ecdh.PrivateKey, participantECDHPubKeys []*ecdh.PublicKey) ([]DecryptedRegistration, error) {
 	results := make([]DecryptedRegistration, len(payloads))
 
@@ -119,7 +124,7 @@ func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivK
 // SortParticipantsForCircuit sorts participants according to circuit requirements:
 // - First N/2 are buyers sorted in descending order by bid (highest bid first)
 // - Last N/2 are sellers sorted in ascending order by bid (lowest ask first)
-// Returns sorted inputs, payloads, and participantDHKeys
+// Returns sorted inputs, payloads, and participantDHKeys.
 func SortParticipantsForCircuit(
 	inputs []DecryptedRegistration,
 	payloads []RegistrationPayload,
@@ -221,7 +226,8 @@ func SortParticipantsForCircuit(
 	return sortedInputs, sortedPayloads, sortedDHKeys, nil
 }
 
-// DecZKRegGo implements the same decryption logic as the circuit's DecZKReg function
+// DecZKRegGo implements the same decryption logic as the circuit's DecZKReg function.
+// Used for off-circuit decryption of registration payloads.
 func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	h := mimcNative.NewMiMC()
 
@@ -259,11 +265,10 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
 }
 
-// RunAuctionLogic implements the same auction logic as the circuit
-// This matches the circuit's clearing price mechanism exactly
-// NOTE: Input is assumed to be pre-sorted by SortParticipantsForCircuit:
-// - First N/2 are buyers sorted in descending order by bid
-// - Last N/2 are sellers sorted in ascending order by bid
+// RunAuctionLogic implements the same auction logic as the circuit.
+// This matches the circuit's clearing price mechanism exactly.
+// Input must be pre-sorted by SortParticipantsForCircuit.
+// Returns a slice of DecryptedRegistration with updated coin/energy balances for qualified traders.
 func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	if len(inputs) == 0 {
 		return inputs
@@ -329,7 +334,7 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	return outputs
 }
 
-// Helper to create a valid random G1Affine point as a gnark struct
+// randomGnarkG1Affine returns a valid random G1Affine point as a gnark struct.
 func randomGnarkG1Affine() sw_bls12377.G1Affine {
 	var p bls12377.G1Affine
 	_, _, g1, _ := bls12377.Generators()
@@ -340,12 +345,13 @@ func randomGnarkG1Affine() sw_bls12377.G1Affine {
 	}
 }
 
-// Helper to create a [5]frontend.Variable with all "1"
+// onesArray5 returns a [5]frontend.Variable with all elements set to "1".
 func onesArray5() [5]frontend.Variable {
 	return [5]frontend.Variable{"1", "1", "1", "1", "1"}
 }
 
 // BuildWitnessF10 builds the witness for CircuitTxF10 from input/output notes using the new array-based structure and REAL participant DH private keys.
+// Populates all circuit fields for 10 participants.
 func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *bls12377.G1Affine) *CircuitTxF10 {
 	w := &CircuitTxF10{}
 
@@ -619,6 +625,7 @@ func BuildWitnessF10(inputs, outputs []DecryptedRegistration, payloads []Registr
 }
 
 // BuildWitnessF20 builds the witness for CircuitTxF20 from input/output notes using the new array-based structure and REAL participant DH private keys.
+// Populates all circuit fields for 20 participants.
 func BuildWitnessF20(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *bls12377.G1Affine) *CircuitTxF20 {
 	w := &CircuitTxF20{}
 
@@ -892,6 +899,7 @@ func BuildWitnessF20(inputs, outputs []DecryptedRegistration, payloads []Registr
 }
 
 // GenerateProofF10 generates a Groth16 proof for CircuitTxF10.
+// Returns the proof as a byte slice.
 func GenerateProofF10(witness *CircuitTxF10, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 	// Create witness
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
@@ -916,6 +924,7 @@ func GenerateProofF10(witness *CircuitTxF10, pk groth16.ProvingKey, ccs constrai
 }
 
 // GenerateProofF20 generates a Groth16 proof for CircuitTxF20.
+// Returns the proof as a byte slice.
 func GenerateProofF20(witness *CircuitTxF20, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 	// Create witness
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
@@ -939,7 +948,8 @@ func GenerateProofF20(witness *CircuitTxF20, pk groth16.ProvingKey, ccs constrai
 	return proofBuf.Bytes(), nil
 }
 
-// ExchangeTransaction represents the transaction output of the exchange phase
+// ExchangeTransaction represents the transaction output of the exchange phase.
+// Contains all inputs, outputs, and proof data for the auction.
 type ExchangeTransaction struct {
 	Participants int                     `json:"participants"`
 	Inputs       []DecryptedRegistration `json:"inputs"`
@@ -950,7 +960,7 @@ type ExchangeTransaction struct {
 	ProofData    []byte                  `json:"proof_data"`
 }
 
-// AuctionResult represents the output of the auction phase
+// AuctionResult represents the output of the auction phase for public reporting.
 type AuctionResult struct {
 	WinnerID    string   `json:"winner_id"`
 	WinningBid  *big.Int `json:"winning_bid"`
@@ -961,7 +971,7 @@ type AuctionResult struct {
 	ProofHash   string   `json:"proof_hash"`
 }
 
-// PublicInfo represents public information about the auction
+// PublicInfo represents public information about the auction for external reporting.
 type PublicInfo struct {
 	AuctionID    string   `json:"auction_id"`
 	Participants int      `json:"participants"`
@@ -972,7 +982,8 @@ type PublicInfo struct {
 	Status       string   `json:"status"`
 }
 
-// validateExchangeInputs validates all inputs to ExchangePhase
+// validateExchangeInputs validates all inputs to ExchangePhase.
+// Returns an error if any input is invalid or missing.
 func validateExchangeInputs(
 	regPayloads []RegistrationPayload,
 	auctioneerSk *big.Int,
@@ -1034,8 +1045,9 @@ func validateExchangeInputs(
 	return nil
 }
 
-// BuildWitnessFN builds a witness for the dynamic CircuitTxFN
-func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *bls12377.G1Affine) *CircuitTxFN {
+// BuildWitnessFN builds a witness for the dynamic CircuitTxFN.
+// Populates all circuit fields for N participants using the provided auction results.
+func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *sw_bls12377.G1Affine) *CircuitTxFN {
 	n := len(payloads)
 	if n == 0 {
 		panic("BuildWitnessFN: no payloads provided")
@@ -1144,6 +1156,17 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 				X: gr.X.String(),
 				Y: gr.Y.String(),
 			} // G_r = G^R (using real private key)
+	}
+
+	// Helper to convert sw_bls12377.G1Affine to bls12377.G1Affine
+	swToNative := func(p *sw_bls12377.G1Affine) *bls12377.G1Affine {
+		if p == nil {
+			return nil
+		}
+		native := &bls12377.G1Affine{}
+		native.X.SetString(p.X.(string))
+		native.Y.SetString(p.Y.(string))
+		return native
 	}
 
 	// Convert auctioneer's secret key to BLS12-377 field element
@@ -1301,7 +1324,7 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		}
 
 		// Create DH components for this participant
-		G, G_b, R, G_r := createDHComponents(shared, &participantSk, auctioneerDHPk)
+		G, G_b, R, G_r := createDHComponents(shared, &participantSk, swToNative(auctioneerDHPk))
 
 		// Set DH parameters
 		circuit.R[i] = R
@@ -1317,7 +1340,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 	return circuit
 }
 
-// GenerateProofFN generates a proof using the dynamic CircuitTxFN
+// GenerateProofFN generates a proof using the dynamic CircuitTxFN.
+// Returns the proof as a byte slice.
 func GenerateProofFN(witness *CircuitTxFN, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 	// Create witness
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
@@ -1341,7 +1365,9 @@ func GenerateProofFN(witness *CircuitTxFN, pk groth16.ProvingKey, ccs constraint
 	return proofBuf.Bytes(), nil
 }
 
-// Updated ExchangePhase that handles both registration data and transaction notes with REAL DH keys
+// ExchangePhaseWithNotes is the main entry point for the exchange phase with note decryption.
+// Handles registration data, transaction notes, sorting, auction logic, witness generation, and proof creation.
+// Returns the exchange transaction, auction result, and proof.
 func ExchangePhaseWithNotes(
 	regPayloads []RegistrationPayload,
 	auctioneerSk *big.Int,
@@ -1428,7 +1454,12 @@ func ExchangePhaseWithNotes(
 	outputs := RunAuctionLogic(sortedInputs)
 
 	// 6. Build witness using the dynamic circuit approach with sorted data
-	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, auctioneerDHPk)
+	// Convert auctioneerDHPk from *bls12377.G1Affine to *sw_bls12377.G1Affine
+	swAuctioneerDHPk := &sw_bls12377.G1Affine{
+		X: auctioneerDHPk.X.String(),
+		Y: auctioneerDHPk.Y.String(),
+	}
+	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk)
 	proof, err = GenerateProofFN(witness, pk, ccs)
 
 	if err != nil {
