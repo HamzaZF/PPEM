@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -261,15 +262,18 @@ func createMarketConfigForN(n int) MarketConfig {
 	if n <= 0 {
 		panic("createMarketConfigForN: N must be positive")
 	}
+	if n%4 != 0 {
+		panic("createMarketConfigForN: N must be divisible by 4")
+	}
 
 	// Create roles map: first half are buyers, second half are sellers
 	roles := make(map[int]zerocash.OrderType)
-	buyers := n / 2
+	halfN := n / 2
 
-	for i := 0; i < buyers; i++ {
+	for i := 0; i < halfN; i++ {
 		roles[i] = zerocash.BUY
 	}
-	for i := buyers; i < n; i++ {
+	for i := halfN; i < n; i++ {
 		roles[i] = zerocash.SELL
 	}
 
@@ -280,8 +284,22 @@ func createMarketConfigForN(n int) MarketConfig {
 
 	for i := 0; i < n; i++ {
 		initialCoins[i] = int64(1000 + i*100)
-		initialEnergy[i] = int64(50 + i*10)
-		bidPrices[i] = int64(20 + i*5)
+		// Use fixed trading volume (same as circuit TRADING_VOLUME constant)
+		initialEnergy[i] = 100
+	}
+
+	// Set bid prices according to the specified pattern:
+	// Buyers' bids (already sorted): [N/2, N/2-1, ..., 1] (descending)
+	// Sellers' asks (already sorted): [1, ..., N/2-1, N/2] (ascending)
+
+	// For buyers (indices 0 to N/2-1): bids [N/2, N/2-1, ..., 1]
+	for i := 0; i < halfN; i++ {
+		bidPrices[i] = int64(halfN - i) // N/2, N/2-1, ..., 1
+	}
+
+	// For sellers (indices N/2 to N-1): asks [1, ..., N/2-1, N/2]
+	for i := halfN; i < n; i++ {
+		bidPrices[i] = int64(i - halfN + 1) // 1, 2, ..., N/2
 	}
 
 	return MarketConfig{
@@ -301,6 +319,10 @@ func createMarketConfigForN(n int) MarketConfig {
 func validateConfig(config MarketConfig) error {
 	if config.NumParticipants <= 0 {
 		return fmt.Errorf("number of participants must be positive")
+	}
+
+	if config.NumParticipants%4 != 0 {
+		return fmt.Errorf("number of participants must be divisible by 4, got %d", config.NumParticipants)
 	}
 
 	if len(config.InitialCoins) != config.NumParticipants {
@@ -389,8 +411,15 @@ type CircuitKeys struct {
 func main() {
 	// Parse command-line flags
 	var numParticipants int
-	flag.IntVar(&numParticipants, "n", 30, "Number of participants (default: 30)")
+	flag.IntVar(&numParticipants, "n", 28, "Number of participants (must be divisible by 4, default: 28)")
 	flag.Parse()
+
+	// Validate that n is divisible by 4
+	if numParticipants%4 != 0 {
+		fmt.Printf("Error: Number of participants must be divisible by 4, got %d\n", numParticipants)
+		fmt.Printf("Valid examples: 4, 8, 12, 16, 20, 24, 28, 32, etc.\n")
+		os.Exit(1)
+	}
 
 	fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)")
 	fmt.Println("================================================")

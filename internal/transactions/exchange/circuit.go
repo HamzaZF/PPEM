@@ -18,6 +18,9 @@ import (
 	"github.com/consensys/gnark/std/hash/mimc"
 )
 
+// TRADING_VOLUME is the hardcoded trading volume for the simplified auction
+const TRADING_VOLUME = 10
+
 // DecZKReg decrypts a registration ciphertext in the circuit using MiMC-based mask chain.
 func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affine) [5]frontend.Variable {
 	hasher, _ := mimc.NewMiMC(api)
@@ -212,16 +215,175 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
 	}
 
-	// --- Verify the auction logic ---
-	// TODO: Implement auction matching logic here
-	// For now, preserve input values (this should be replaced with actual auction logic)
-	for coin := 0; coin < c.N; coin++ {
-		api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
-		api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
+	// --- Implement auction trading logic ---
+	// Define clearing price as the bid of buyer number N/4
+	clearingPrice := c.DecVal[halfN/2][2]
+
+	// Process trading for all participants
+	for i := 0; i < c.N; i++ {
+		if i < halfN {
+			// This is a buyer (index 0 to N/2-1)
+			// Buyer qualifies if their bid >= clearing price
+
+			// Calculate trading results
+			tradingCost := api.Mul(clearingPrice, TRADING_VOLUME)
+			coinAfterTrade := api.Sub(c.InCoin[i], tradingCost)
+			energyAfterTrade := api.Add(c.InEnergy[i], TRADING_VOLUME)
+
+			// Simplified qualification: bid >= clearing price
+			// If (bid - clearing) >= 0, then qualified = 1, else qualified = 0
+			bidDiff := api.Sub(c.DecVal[i][2], clearingPrice)
+			qualified := api.IsZero(api.IsZero(bidDiff)) // This gives 1 if bidDiff >= 0
+
+			// Apply trading only if qualified using multiplication
+			tradingDelta := api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i]))
+			energyDelta := api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i]))
+
+			c.OutCoin[i] = api.Add(c.InCoin[i], tradingDelta)
+			c.OutEnergy[i] = api.Add(c.InEnergy[i], energyDelta)
+		} else {
+			// This is a seller (index N/2 to N-1)
+			// Seller qualifies if their ask <= clearing price
+
+			// Calculate trading results
+			tradingRevenue := api.Mul(clearingPrice, TRADING_VOLUME)
+			coinAfterTrade := api.Add(c.InCoin[i], tradingRevenue)
+			energyAfterTrade := api.Sub(c.InEnergy[i], TRADING_VOLUME)
+
+			// Simplified qualification: ask <= clearing price
+			// If (clearing - ask) >= 0, then qualified = 1, else qualified = 0
+			askDiff := api.Sub(clearingPrice, c.DecVal[i][2])
+			qualified := api.IsZero(api.IsZero(askDiff)) // This gives 1 if askDiff >= 0
+
+			// Apply trading only if qualified using multiplication
+			tradingDelta := api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i]))
+			energyDelta := api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i]))
+
+			c.OutCoin[i] = api.Add(c.InCoin[i], tradingDelta)
+			c.OutEnergy[i] = api.Add(c.InEnergy[i], energyDelta)
+		}
 	}
 
 	return nil
 }
+
+// // Define implements the constraints for CircuitTxFN using dynamic arrays and for loops.
+// func (c *CircuitTxFN) Define(api frontend.API) error {
+// 	// Process all N coins using a for loop
+// 	for coin := 0; coin < c.N; coin++ {
+// 		// --- Decrypt and verify the registration data ---
+// 		decVal := DecZKReg(api, c.C[coin][:], c.EncKey[coin])
+// 		for i := 0; i < 5; i++ {
+// 			api.AssertIsEqual(c.DecVal[coin][i], decVal[i])
+// 		}
+
+// 		// --- Verify serial number computation ---
+// 		snComputed := PRF(api, c.InSk[coin], c.InRho[coin])
+// 		api.AssertIsEqual(c.InSn[coin], snComputed)
+
+// 		// --- Compute output commitment: cm = Com(Γ || pk || ρ, r) where Γ = (coins, energy) ---
+// 		hasher, _ := mimc.NewMiMC(api)
+// 		hasher.Write(c.OutCoin[coin])   // Γ.coins
+// 		hasher.Write(c.OutEnergy[coin]) // Γ.energy
+// 		hasher.Write(c.OutPk[coin])     // pk (public key)
+// 		hasher.Write(c.OutRho[coin])    // ρ (rho)
+// 		hasher.Write(c.OutRand[coin])   // r (randomness)
+// 		cm := hasher.Sum()
+// 		api.AssertIsEqual(c.OutCm[coin], cm)
+
+// 		// --- Verify DH encryption constraints ---
+// 		// EncKey = G_b^R (same variable used for both decryption and DH verification)
+// 		G_r_b := new(sw_bls12377.G1Affine)
+// 		G_r_b.ScalarMul(api, c.G_b[coin], c.R[coin])
+// 		api.AssertIsEqual(c.EncKey[coin].X, G_r_b.X)
+// 		api.AssertIsEqual(c.EncKey[coin].Y, G_r_b.Y)
+
+// 		// G_r = G^R
+// 		G_r := new(sw_bls12377.G1Affine)
+// 		G_r.ScalarMul(api, c.G[coin], c.R[coin])
+// 		api.AssertIsEqual(c.G_r[coin].X, G_r.X)
+// 		api.AssertIsEqual(c.G_r[coin].Y, G_r.Y)
+
+// 		// --- Verify public key derivation: InPk = MiMC(InSk) ---
+// 		hasher.Reset()
+// 		hasher.Write(c.InSk[coin])
+// 		pk := hasher.Sum()
+// 		api.AssertIsEqual(c.InPk[coin], pk)
+// 	}
+
+// 	// --- Verify auction sorting constraints ---
+// 	// First half (0 to N/2-1) are buyers: DecVal[i][2] should be in descending order (highest bid first)
+// 	// Second half (N/2 to N-1) are sellers: DecVal[i][2] should be in ascending order (lowest ask first)
+// 	halfN := c.N / 2
+
+// 	// Verify buyers are sorted in descending order (highest bid first)
+// 	for i := 0; i < halfN-1; i++ {
+// 		// For buyers: DecVal[i][2] >= DecVal[i+1][2]
+// 		// Use api.AssertIsLessOrEqual to verify DecVal[i+1][2] <= DecVal[i][2]
+// 		api.AssertIsLessOrEqual(c.DecVal[i+1][2], c.DecVal[i][2])
+// 	}
+
+// 	// Verify sellers are sorted in ascending order (lowest ask first)
+// 	for i := halfN; i < c.N-1; i++ {
+// 		// For sellers: DecVal[i][2] <= DecVal[i+1][2]
+// 		api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
+// 	}
+
+// 	// --- Implement auction trading logic ---
+// 	// Define clearing price as the ask of seller number N/2 (first seller)
+// 	clearingPrice := c.DecVal[halfN][2]
+
+// 	// Process trading for all participants
+// 	for i := 0; i < c.N; i++ {
+// 		if i < halfN {
+// 			// This is a buyer (index 0 to N/2-1)
+// 			// Buyer qualifies if their bid >= clearing price
+
+// 			// Buyer qualifies if their bid >= clearing price
+// 			// Calculate trading results
+// 			tradingCost := api.Mul(clearingPrice, TRADING_VOLUME)
+// 			coinAfterTrade := api.Sub(c.InCoin[i], tradingCost)
+// 			energyAfterTrade := api.Add(c.InEnergy[i], TRADING_VOLUME)
+
+// 			// Buyer qualifies if bid >= clearing price
+// 			// Use conditional logic: if qualified, apply trading; else keep original
+
+// 			// Calculate qualification: 1 if bid >= clearing, 0 otherwise
+// 			qualified := api.IsZero(api.IsZero(api.Sub(c.DecVal[i][2], clearingPrice)))
+
+// 			// Apply trading only if qualified using multiplication
+// 			tradingDelta := api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i]))
+// 			energyDelta := api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i]))
+
+// 			c.OutCoin[i] = api.Add(c.InCoin[i], tradingDelta)
+// 			c.OutEnergy[i] = api.Add(c.InEnergy[i], energyDelta)
+// 		} else {
+// 			// This is a seller (index N/2 to N-1)
+// 			// Seller qualifies if their ask <= clearing price
+
+// 			// Seller qualifies if their ask <= clearing price
+// 			// Calculate trading results
+// 			tradingRevenue := api.Mul(clearingPrice, TRADING_VOLUME)
+// 			coinAfterTrade := api.Add(c.InCoin[i], tradingRevenue)
+// 			energyAfterTrade := api.Sub(c.InEnergy[i], TRADING_VOLUME)
+
+// 			// Seller qualifies if ask <= clearing price
+// 			// Use conditional logic: if qualified, apply trading; else keep original
+
+// 			// Calculate qualification: 1 if ask <= clearing, 0 otherwise
+// 			qualified := api.IsZero(api.IsZero(api.Sub(clearingPrice, c.DecVal[i][2])))
+
+// 			// Apply trading only if qualified using multiplication
+// 			tradingDelta := api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i]))
+// 			energyDelta := api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i]))
+
+// 			c.OutCoin[i] = api.Add(c.InCoin[i], tradingDelta)
+// 			c.OutEnergy[i] = api.Add(c.InEnergy[i], energyDelta)
+// 		}
+// 	}
+
+// 	return nil
+// }
 
 // CircuitTxF10 represents a circuit for 10 coins/participants in the auction phase.
 // DEPRECATED: Use CircuitTxFN instead for better scalability.

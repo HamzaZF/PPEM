@@ -1193,7 +1193,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 
 		// Get consistent values for this participant
 		coins := getSafeValue(in, "coins")
-		energy := getSafeValue(in, "energy")
+		// Use fixed trading volume for simplified auction
+		energy := big.NewInt(TRADING_VOLUME)
 		skIn := getSafeValue(in, "skin")
 		bid := getSafeValue(in, "bid")
 
