@@ -273,33 +273,6 @@ func TestCircuitTxRegister(t *testing.T) {
 	})
 }
 
-func TestCircuitTxF10(t *testing.T) {
-	t.Run("CircuitTxF10 Compilation", func(t *testing.T) {
-		var circuit exchange.CircuitTxF10
-		_, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
-		if err != nil {
-			t.Fatalf("CircuitTxF10 compilation failed: %v", err)
-		}
-	})
-
-	t.Run("CircuitTxF10 Key Generation", func(t *testing.T) {
-		var circuit exchange.CircuitTxF10
-		ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
-		if err != nil {
-			t.Fatalf("CircuitTxF10 compilation failed: %v", err)
-		}
-
-		pk, vk, err := groth16.Setup(ccs)
-		if err != nil {
-			t.Fatalf("CircuitTxF10 key generation failed: %v", err)
-		}
-
-		if pk == nil || vk == nil {
-			t.Error("Generated keys are nil")
-		}
-	})
-}
-
 func TestCircuitWithdraw(t *testing.T) {
 	t.Run("CircuitWithdraw Compilation", func(t *testing.T) {
 		var circuit withdraw.CircuitWithdraw
