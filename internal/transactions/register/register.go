@@ -37,7 +37,6 @@ type RegisterResult struct {
 }
 
 // Algorithm 2: Register(n^base, Γ^in, b_i) → (C^Aux, tx^in, info_bid, π_reg)
-// Follows the paper exactly, excluding r_enc for DH-OTP encryption
 // auctioneerECDHPubKey: Auctioneer's ECDH public key for note encryption in CreateTx
 // participantECDHPrivKey: Participant's permanent ECDH private key for note encryption (Option 1)
 func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.Int,
