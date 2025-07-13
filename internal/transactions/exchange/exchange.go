@@ -259,8 +259,8 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
 }
 
-// RunAuctionLogic implements a sealed-bid double auction mechanism (SBExM)
-// This is the core auction algorithm that matches buyers and sellers
+// RunAuctionLogic implements the same auction logic as the circuit
+// This matches the circuit's clearing price mechanism exactly
 // NOTE: Input is assumed to be pre-sorted by SortParticipantsForCircuit:
 // - First N/2 are buyers sorted in descending order by bid
 // - Last N/2 are sellers sorted in ascending order by bid
@@ -276,60 +276,53 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
-	// Execute double auction matching
-	// Input is already sorted: buyers (0 to N/2-1) and sellers (N/2 to N-1)
-	buyerIdx, sellerIdx := 0, 0
-	for buyerIdx < halfN && sellerIdx < halfN {
-		buyer := buyerIdx
-		seller := halfN + sellerIdx
+	// Define clearing price as the bid of buyer number N/4 (matches circuit logic)
+	clearingPriceIdx := halfN / 2
+	if clearingPriceIdx >= len(inputs) || inputs[clearingPriceIdx].Bid == nil {
+		return outputs // No clearing price available
+	}
+	clearingPrice := new(big.Int).Set(inputs[clearingPriceIdx].Bid)
 
-		buyerBid := inputs[buyer].Bid
-		sellerBid := inputs[seller].Bid
+	// Fixed trading volume (same as circuit TRADING_VOLUME constant)
+	tradingVolume := big.NewInt(TRADING_VOLUME)
 
-		if buyerBid == nil || sellerBid == nil {
-			break
-		}
+	// Process trading for all participants (matches circuit logic)
+	fmt.Printf("Auction debug: clearingPrice=%v, tradingVolume=%v\n", clearingPrice, tradingVolume)
+	for i := 0; i < numParticipants; i++ {
+		if i < halfN {
+			// This is a buyer (index 0 to N/2-1)
+			// Buyer qualifies if their bid >= clearing price
+			qualified := inputs[i].Bid != nil && inputs[i].Bid.Cmp(clearingPrice) >= 0
+			fmt.Printf("Buyer %d: bid=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Bid, clearingPrice, qualified, inputs[i].Energy)
 
-		// Check if trade is possible (buyer bid >= seller ask)
-		if buyerBid.Cmp(sellerBid) >= 0 {
-			// Calculate trade price (midpoint between bid and ask)
-			tradePrice := new(big.Int)
-			tradePrice.Add(buyerBid, sellerBid)
-			tradePrice.Div(tradePrice, big.NewInt(2))
+			if qualified {
+				// Calculate trading cost
+				tradingCost := new(big.Int).Mul(clearingPrice, tradingVolume)
 
-			// Calculate trade quantity (minimum of what buyer wants and seller has)
-			buyerWantedEnergy := inputs[buyer].Energy
-			sellerAvailableEnergy := inputs[seller].Energy
-
-			tradeQuantity := new(big.Int)
-			if buyerWantedEnergy.Cmp(sellerAvailableEnergy) <= 0 {
-				tradeQuantity.Set(buyerWantedEnergy)
+				// Apply trading: buyer loses coins, gains energy (assign new values)
+				outputs[i].Coins = new(big.Int).Sub(inputs[i].Coins, tradingCost)
+				outputs[i].Energy = new(big.Int).Add(inputs[i].Energy, tradingVolume)
+				fmt.Printf("  -> Updated: outCoins=%v, outEnergy=%v\n", outputs[i].Coins, outputs[i].Energy)
 			} else {
-				tradeQuantity.Set(sellerAvailableEnergy)
+				fmt.Printf("  -> Not qualified, keeping original values\n")
 			}
-
-			// Calculate total trade value
-			tradeValue := new(big.Int)
-			tradeValue.Mul(tradePrice, tradeQuantity)
-
-			// Update buyer: gains energy, loses coins
-			if outputs[buyer].Energy != nil && outputs[buyer].Coins != nil {
-				outputs[buyer].Energy.Add(outputs[buyer].Energy, tradeQuantity)
-				outputs[buyer].Coins.Sub(outputs[buyer].Coins, tradeValue)
-			}
-
-			// Update seller: loses energy, gains coins
-			if outputs[seller].Energy != nil && outputs[seller].Coins != nil {
-				outputs[seller].Energy.Sub(outputs[seller].Energy, tradeQuantity)
-				outputs[seller].Coins.Add(outputs[seller].Coins, tradeValue)
-			}
-
-			// Move to next participants
-			buyerIdx++
-			sellerIdx++
 		} else {
-			// No more profitable trades possible
-			break
+			// This is a seller (index N/2 to N-1)
+			// Seller qualifies if their ask <= clearing price
+			qualified := inputs[i].Bid != nil && inputs[i].Bid.Cmp(clearingPrice) <= 0
+			fmt.Printf("Seller %d: ask=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Bid, clearingPrice, qualified, inputs[i].Energy)
+
+			if qualified {
+				// Calculate trading revenue
+				tradingRevenue := new(big.Int).Mul(clearingPrice, tradingVolume)
+
+				// Apply trading: seller gains coins, loses energy (assign new values)
+				outputs[i].Coins = new(big.Int).Add(inputs[i].Coins, tradingRevenue)
+				outputs[i].Energy = new(big.Int).Sub(inputs[i].Energy, tradingVolume)
+				fmt.Printf("  -> Updated: outCoins=%v, outEnergy=%v\n", outputs[i].Coins, outputs[i].Energy)
+			} else {
+				fmt.Printf("  -> Not qualified, keeping original values\n")
+			}
 		}
 	}
 
@@ -1193,8 +1186,7 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 
 		// Get consistent values for this participant
 		coins := getSafeValue(in, "coins")
-		// Use fixed trading volume for simplified auction
-		energy := big.NewInt(TRADING_VOLUME)
+		energy := getSafeValue(in, "energy")
 		skIn := getSafeValue(in, "skin")
 		bid := getSafeValue(in, "bid")
 
@@ -1223,14 +1215,31 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		circuit.InRho[i] = toVar(rho)
 		circuit.InRand[i] = toVar(rand)
 
-		// Set outputs equal to inputs to satisfy circuit constraints
-		circuit.OutCoin[i] = toVar(coins)
-		circuit.OutEnergy[i] = toVar(energy)
-		circuit.OutCm[i] = toVar(cm)
-		circuit.OutSn[i] = toVar(sn)
-		circuit.OutPk[i] = toVar(pkOut)
-		circuit.OutRho[i] = toVar(rho)
-		circuit.OutRand[i] = toVar(rand)
+		// Set outputs from the auction results (outputs slice)
+		var out DecryptedRegistration
+		if i < len(outputs) {
+			out = outputs[i]
+		} else {
+			out = in // fallback to input if no output
+		}
+		outCoins := getSafeValue(out, "coins")
+		outEnergy := getSafeValue(out, "energy")
+		// Recompute output pk, rho, rand, sn, cm for consistency
+		outSkIn := getSafeValue(out, "skin")
+		outBid := getSafeValue(out, "bid")
+		outPkOut := mimcHash(outSkIn)
+		outRho := outBid
+		outRand := outCoins
+		outSn := prf(outSkIn, outRho)
+		outCm := computeCommitment(outCoins, outEnergy, outPkOut, outRho, outRand)
+
+		circuit.OutCoin[i] = toVar(outCoins)
+		circuit.OutEnergy[i] = toVar(outEnergy)
+		circuit.OutCm[i] = toVar(outCm)
+		circuit.OutSn[i] = toVar(outSn)
+		circuit.OutPk[i] = toVar(outPkOut)
+		circuit.OutRho[i] = toVar(outRho)
+		circuit.OutRand[i] = toVar(outRand)
 
 		// Set ciphertext and decrypted values with proper encryption relationship
 		if i < len(payloads) {
