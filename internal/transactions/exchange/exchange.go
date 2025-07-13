@@ -116,6 +116,111 @@ func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivK
 	return results, nil
 }
 
+// SortParticipantsForCircuit sorts participants according to circuit requirements:
+// - First N/2 are buyers sorted in descending order by bid (highest bid first)
+// - Last N/2 are sellers sorted in ascending order by bid (lowest ask first)
+// Returns sorted inputs, payloads, and participantDHKeys
+func SortParticipantsForCircuit(
+	inputs []DecryptedRegistration,
+	payloads []RegistrationPayload,
+	participantDHKeys []*bls12377_fr.Element,
+) ([]DecryptedRegistration, []RegistrationPayload, []*bls12377_fr.Element, error) {
+
+	n := len(inputs)
+	if n%2 != 0 {
+		return nil, nil, nil, fmt.Errorf("number of participants must be even, got %d", n)
+	}
+
+	halfN := n / 2
+
+	// Create pairs of (index, data) for sorting
+	type ParticipantData struct {
+		Index   int
+		Input   DecryptedRegistration
+		Payload RegistrationPayload
+		DHKey   *bls12377_fr.Element
+	}
+
+	// Split participants into buyers and sellers based on their index
+	// First N/2 are buyers, last N/2 are sellers
+	buyers := make([]ParticipantData, halfN)
+	sellers := make([]ParticipantData, halfN)
+
+	for i := 0; i < n; i++ {
+		var dhKey *bls12377_fr.Element
+		if i < len(participantDHKeys) {
+			dhKey = participantDHKeys[i]
+		}
+
+		data := ParticipantData{
+			Index:   i,
+			Input:   inputs[i],
+			Payload: payloads[i],
+			DHKey:   dhKey,
+		}
+
+		if i < halfN {
+			buyers[i] = data
+		} else {
+			sellers[i-halfN] = data
+		}
+	}
+
+	// Sort buyers in descending order by bid (highest bid first)
+	sort.Slice(buyers, func(i, j int) bool {
+		bidI := buyers[i].Input.Bid
+		bidJ := buyers[j].Input.Bid
+		if bidI == nil && bidJ == nil {
+			return false
+		}
+		if bidI == nil {
+			return false
+		}
+		if bidJ == nil {
+			return true
+		}
+		return bidI.Cmp(bidJ) > 0 // Descending order
+	})
+
+	// Sort sellers in ascending order by bid (lowest ask first)
+	sort.Slice(sellers, func(i, j int) bool {
+		bidI := sellers[i].Input.Bid
+		bidJ := sellers[j].Input.Bid
+		if bidI == nil && bidJ == nil {
+			return false
+		}
+		if bidI == nil {
+			return true
+		}
+		if bidJ == nil {
+			return false
+		}
+		return bidI.Cmp(bidJ) < 0 // Ascending order
+	})
+
+	// Reconstruct the sorted arrays
+	sortedInputs := make([]DecryptedRegistration, n)
+	sortedPayloads := make([]RegistrationPayload, n)
+	sortedDHKeys := make([]*bls12377_fr.Element, n)
+
+	// Add buyers first (indices 0 to N/2-1)
+	for i, buyer := range buyers {
+		sortedInputs[i] = buyer.Input
+		sortedPayloads[i] = buyer.Payload
+		sortedDHKeys[i] = buyer.DHKey
+	}
+
+	// Add sellers last (indices N/2 to N-1)
+	for i, seller := range sellers {
+		idx := halfN + i
+		sortedInputs[idx] = seller.Input
+		sortedPayloads[idx] = seller.Payload
+		sortedDHKeys[idx] = seller.DHKey
+	}
+
+	return sortedInputs, sortedPayloads, sortedDHKeys, nil
+}
+
 // DecZKRegGo implements the same decryption logic as the circuit's DecZKReg function
 func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	h := mimcNative.NewMiMC()
@@ -156,85 +261,27 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 
 // RunAuctionLogic implements a sealed-bid double auction mechanism (SBExM)
 // This is the core auction algorithm that matches buyers and sellers
-// NOTE: Participant roles are now explicitly defined in main.go, no guessing needed!
+// NOTE: Input is assumed to be pre-sorted by SortParticipantsForCircuit:
+// - First N/2 are buyers sorted in descending order by bid
+// - Last N/2 are sellers sorted in ascending order by bid
 func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	if len(inputs) == 0 {
 		return inputs
 	}
 
-	// SIMPLIFIED: Use the explicit participant roles defined in main.go
-	// For N=10: Buyers: participants 0-4, Sellers: participants 5-9
-	// For N=20: Buyers: participants 0-9, Sellers: participants 10-19
-	var buyers, sellers []int
 	numParticipants := len(inputs)
-
-	for i := range inputs {
-		if numParticipants == 10 {
-			// N=10: first 5 are buyers, last 5 are sellers
-			if i < 5 {
-				buyers = append(buyers, i) // Participants 0-4 are BUYERS
-			} else {
-				sellers = append(sellers, i) // Participants 5-9 are SELLERS
-			}
-		} else if numParticipants == 20 {
-			// N=20: first 10 are buyers, last 10 are sellers
-			if i < 10 {
-				buyers = append(buyers, i) // Participants 0-9 are BUYERS
-			} else {
-				sellers = append(sellers, i) // Participants 10-19 are SELLERS
-			}
-		} else {
-			// Default: first half are buyers, second half are sellers
-			midpoint := numParticipants / 2
-			if i < midpoint {
-				buyers = append(buyers, i)
-			} else {
-				sellers = append(sellers, i)
-			}
-		}
-	}
-
-	// Sort buyers by bid (descending - highest bids first)
-	sort.Slice(buyers, func(i, j int) bool {
-		bidI := inputs[buyers[i]].Bid
-		bidJ := inputs[buyers[j]].Bid
-		if bidI == nil && bidJ == nil {
-			return false
-		}
-		if bidI == nil {
-			return false
-		}
-		if bidJ == nil {
-			return true
-		}
-		return bidI.Cmp(bidJ) > 0
-	})
-
-	// Sort sellers by bid (ascending - lowest ask prices first)
-	sort.Slice(sellers, func(i, j int) bool {
-		bidI := inputs[sellers[i]].Bid
-		bidJ := inputs[sellers[j]].Bid
-		if bidI == nil && bidJ == nil {
-			return false
-		}
-		if bidI == nil {
-			return true
-		}
-		if bidJ == nil {
-			return false
-		}
-		return bidI.Cmp(bidJ) < 0
-	})
+	halfN := numParticipants / 2
 
 	// Create output array (copy of inputs initially)
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
 	// Execute double auction matching
+	// Input is already sorted: buyers (0 to N/2-1) and sellers (N/2 to N-1)
 	buyerIdx, sellerIdx := 0, 0
-	for buyerIdx < len(buyers) && sellerIdx < len(sellers) {
-		buyer := buyers[buyerIdx]
-		seller := sellers[sellerIdx]
+	for buyerIdx < halfN && sellerIdx < halfN {
+		buyer := buyerIdx
+		seller := halfN + sellerIdx
 
 		buyerBid := inputs[buyer].Bid
 		sellerBid := inputs[seller].Bid
@@ -1339,13 +1386,39 @@ func ExchangePhaseWithNotes(
 		}
 	}
 
-	// 4. Run auction logic - sophisticated sealed-bid double auction mechanism
-	outputs := RunAuctionLogic(inputs)
+	// 4. Sort participants according to circuit requirements
+	// First N/2 are buyers (descending by bid), last N/2 are sellers (ascending by bid)
+	sortedInputs, sortedPayloads, sortedDHKeys, err := SortParticipantsForCircuit(inputs, regPayloads, participantDHKeys)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to sort participants for circuit: %w", err)
+	}
 
-	// 5. Build witness using the dynamic circuit approach
+	// Debug: Log the sorted bids to verify circuit requirements
+	fmt.Printf("Sorted participants for circuit verification:\n")
+	halfN := len(sortedInputs) / 2
+	fmt.Printf("  Buyers (descending by bid): ")
+	for i := 0; i < halfN; i++ {
+		if sortedInputs[i].Bid != nil {
+			fmt.Printf("%s ", sortedInputs[i].Bid.String())
+		} else {
+			fmt.Printf("nil ")
+		}
+	}
+	fmt.Printf("\n  Sellers (ascending by bid): ")
+	for i := halfN; i < len(sortedInputs); i++ {
+		if sortedInputs[i].Bid != nil {
+			fmt.Printf("%s ", sortedInputs[i].Bid.String())
+		} else {
+			fmt.Printf("nil ")
+		}
+	}
+	fmt.Printf("\n")
 
-	// Use dynamic circuit for any N participants
-	witness := BuildWitnessFN(inputs, outputs, regPayloads, auctioneerSk, participantDHKeys, auctioneerDHPk)
+	// 5. Run auction logic with sorted data - sophisticated sealed-bid double auction mechanism
+	outputs := RunAuctionLogic(sortedInputs)
+
+	// 6. Build witness using the dynamic circuit approach with sorted data
+	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, auctioneerDHPk)
 	proof, err = GenerateProofFN(witness, pk, ccs)
 
 	if err != nil {

@@ -58,8 +58,10 @@ func createDefaultMarketConfig() MarketConfig {
 		InitialCoins:  []int64{1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900},
 		InitialEnergy: []int64{50, 60, 70, 80, 90, 100, 110, 120, 130, 140},
 
-		// Bid prices: buyers bid higher, sellers ask higher
-		BidPrices: []int64{20, 25, 30, 35, 40, 45, 50, 55, 60, 65},
+		// Bid prices: buyers willing to pay more, sellers asking for less (enables trades)
+		// Buyers (0-4): 60, 55, 50, 45, 40 (descending - high to low willingness to pay)
+		// Sellers (5-9): 30, 35, 40, 45, 50 (ascending - low to high asking price)
+		BidPrices: []int64{60, 55, 50, 45, 40, 30, 35, 40, 45, 50},
 
 		// No withdrawal by default (normal market operation)
 		WithdrawalMode: "none",
@@ -153,10 +155,12 @@ func createMarketConfig20Participants() MarketConfig {
 			150, 160, 170, 180, 190, 200, 210, 220, 230, 240, // Sellers
 		},
 
-		// Bid prices: buyers bid higher, sellers ask higher
+		// Bid prices: buyers willing to pay more, sellers asking for less (enables trades)
+		// Buyers (0-9): 100, 95, 90, 85, 80, 75, 70, 65, 60, 55 (descending)
+		// Sellers (10-19): 30, 35, 40, 45, 50, 55, 60, 65, 70, 75 (ascending)
 		BidPrices: []int64{
-			20, 25, 30, 35, 40, 45, 50, 55, 60, 65, // Buyers (willing to pay more)
-			70, 75, 80, 85, 90, 95, 100, 105, 110, 115, // Sellers (asking for more)
+			100, 95, 90, 85, 80, 75, 70, 65, 60, 55, // Buyers (willing to pay more)
+			30, 35, 40, 45, 50, 55, 60, 65, 70, 75, // Sellers (asking for less)
 		},
 
 		// No withdrawal by default (normal market operation)
@@ -209,8 +213,10 @@ func createHighDemandScenario() MarketConfig {
 
 	// Buyers have more coins (high purchasing power)
 	config.InitialCoins = []int64{2000, 2200, 2400, 2600, 2800, 1000, 1100, 1200, 1300, 1400}
-	// Buyers bid higher (desperate for energy)
-	config.BidPrices = []int64{50, 55, 60, 65, 70, 30, 35, 40, 45, 50}
+	// Buyers bid higher (desperate for energy) - higher than default scenario
+	// Buyers (0-4): 80, 75, 70, 65, 60 (very high willingness to pay)
+	// Sellers (5-9): 25, 30, 35, 40, 45 (lower asking prices)
+	config.BidPrices = []int64{80, 75, 70, 65, 60, 25, 30, 35, 40, 45}
 
 	return config
 }
@@ -646,6 +652,9 @@ func executeExchangePhase(state *ProtocolState) error {
 	fmt.Println("  - Generating exchange proof...")
 
 	// Create exchange payloads for the auctioneer
+	// NOTE: Participants will be sorted by the exchange phase according to circuit requirements:
+	// - First N/2 participants are buyers (sorted descending by bid)
+	// - Last N/2 participants are sellers (sorted ascending by bid)
 	exchangePayloads := make([]exchange.RegistrationPayload, state.Config.NumParticipants)
 	participantECDHPubKeys := make([]*ecdh.PublicKey, state.Config.NumParticipants)
 

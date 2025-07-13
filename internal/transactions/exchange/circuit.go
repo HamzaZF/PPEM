@@ -1,9 +1,14 @@
 // circuit.go - Circuit for the auction phase (exchange) of the protocol.
 //
 // Defines dynamic circuits for any N participants, enforcing cryptographic consistency
-// (decryption, PRF, commitments, EC operations) but not the auction logic itself.
+// (decryption, PRF, commitments, EC operations) and basic auction constraints.
 //
-// WARNING: This circuit does NOT enforce the auction computation. Only cryptographic consistency is proven.
+// AUCTION CONSTRAINTS:
+// - First N/2 participants are buyers (sorted descending by bid)
+// - Last N/2 participants are sellers (sorted ascending by ask)
+// - DecVal[i][2] contains the bid/ask price for participant i
+//
+// WARNING: This circuit enforces sorting constraints but does NOT implement the full auction matching logic.
 
 package exchange
 
@@ -56,8 +61,15 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 
 // CircuitTxFN represents a dynamic circuit for N coins/participants in the auction phase.
 // This circuit can be generated for any number of participants.
+//
+// Auction Structure:
+// - First N/2 participants (indices 0 to N/2-1) are BUYERS
+// - Last N/2 participants (indices N/2 to N-1) are SELLERS
+// - DecVal[i][2] represents the bid (for buyers) or ask (for sellers) price
+// - Buyers must be sorted in DESCENDING order (highest bid first)
+// - Sellers must be sorted in ASCENDING order (lowest ask first)
 type CircuitTxFN struct {
-	// Number of participants this circuit supports
+	// Number of participants this circuit supports (must be even)
 	N int
 
 	// ----- Input/Output Arrays for N coins -----
@@ -79,7 +91,7 @@ type CircuitTxFN struct {
 	OutRand   []frontend.Variable `gnark:",public"`
 
 	C      [][]frontend.Variable
-	DecVal [][]frontend.Variable
+	DecVal [][]frontend.Variable // DecVal[i][2] contains the bid/ask price for participant i
 
 	// ----- DH Parameters for each coin -----
 	R      []frontend.Variable
@@ -90,9 +102,13 @@ type CircuitTxFN struct {
 }
 
 // NewCircuitTxFN creates a new dynamic circuit for N participants
+// N must be even: first N/2 participants are buyers, last N/2 are sellers
 func NewCircuitTxFN(n int) *CircuitTxFN {
 	if n <= 0 {
 		panic("CircuitTxFN: N must be positive")
+	}
+	if n%2 != 0 {
+		panic("CircuitTxFN: N must be even (N/2 buyers, N/2 sellers)")
 	}
 
 	circuit := &CircuitTxFN{
@@ -148,10 +164,6 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		snComputed := PRF(api, c.InSk[coin], c.InRho[coin])
 		api.AssertIsEqual(c.InSn[coin], snComputed)
 
-		// --- Preserve coin and energy values ---
-		api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
-		api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
-
 		// --- Compute output commitment: cm = Com(Γ || pk || ρ, r) where Γ = (coins, energy) ---
 		hasher, _ := mimc.NewMiMC(api)
 		hasher.Write(c.OutCoin[coin])   // Γ.coins
@@ -161,10 +173,6 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		hasher.Write(c.OutRand[coin])   // r (randomness)
 		cm := hasher.Sum()
 		api.AssertIsEqual(c.OutCm[coin], cm)
-
-		// --- Verify the auction logic ---
-		// HERE you have to compute the OutCoinComputed and OutEnergyComputed and assert that
-		// OutCoinComputed = OutCoin and OutEnergyComputed = OutEnergy
 
 		// --- Verify DH encryption constraints ---
 		// EncKey = G_b^R (same variable used for both decryption and DH verification)
@@ -184,6 +192,32 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		hasher.Write(c.InSk[coin])
 		pk := hasher.Sum()
 		api.AssertIsEqual(c.InPk[coin], pk)
+	}
+
+	// --- Verify auction sorting constraints ---
+	// First half (0 to N/2-1) are buyers: DecVal[i][2] should be in descending order (highest bid first)
+	// Second half (N/2 to N-1) are sellers: DecVal[i][2] should be in ascending order (lowest ask first)
+	halfN := c.N / 2
+
+	// Verify buyers are sorted in descending order (highest bid first)
+	for i := 0; i < halfN-1; i++ {
+		// For buyers: DecVal[i][2] >= DecVal[i+1][2]
+		// Use api.AssertIsLessOrEqual to verify DecVal[i+1][2] <= DecVal[i][2]
+		api.AssertIsLessOrEqual(c.DecVal[i+1][2], c.DecVal[i][2])
+	}
+
+	// Verify sellers are sorted in ascending order (lowest ask first)
+	for i := halfN; i < c.N-1; i++ {
+		// For sellers: DecVal[i][2] <= DecVal[i+1][2]
+		api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
+	}
+
+	// --- Verify the auction logic ---
+	// TODO: Implement auction matching logic here
+	// For now, preserve input values (this should be replaced with actual auction logic)
+	for coin := 0; coin < c.N; coin++ {
+		api.AssertIsEqual(c.InCoin[coin], c.OutCoin[coin])
+		api.AssertIsEqual(c.InEnergy[coin], c.OutEnergy[coin])
 	}
 
 	return nil
