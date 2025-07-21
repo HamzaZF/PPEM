@@ -334,36 +334,88 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 		return sellers[i].Data.Price.Cmp(sellers[j].Data.Price) < 0
 	})
 
-	// Helper function to find intersection point
+	// Helper function to find intersection point using proper step-wise curve logic
 	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, bool) {
 		if len(buyers) == 0 || len(sellers) == 0 {
 			return nil, false
 		}
 
-		// Find intersection: first point where buyer_bid >= seller_ask
-		for i := 0; i < len(buyers); i++ {
-			for j := 0; j < len(sellers); j++ {
-				buyerBid := buyers[i].Data.Price
-				sellerAsk := sellers[j].Data.Price
+		// Build cumulative step-wise curves
+		buyerSteps := make([]struct {
+			price         *big.Int
+			cumulativeQty int64
+		}, 0)
+		sellerSteps := make([]struct {
+			price         *big.Int
+			cumulativeQty int64
+		}, 0)
 
-				if buyerBid == nil || sellerAsk == nil {
-					continue
-				}
-
-				// Check if curves intersect: buyer willing to pay >= seller willing to accept
-				if buyerBid.Cmp(sellerAsk) >= 0 {
-					// Clearing price = average of intersecting bid and ask
-					sum := new(big.Int).Add(buyerBid, sellerAsk)
-					clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
-					return clearingPrice, true
-				}
+		// Build buyer steps (demand curve - descending prices)
+		var buyerCumQty int64 = 0
+		for _, buyer := range buyers {
+			if buyer.Data.Price != nil && buyer.Data.Quantity != nil {
+				buyerCumQty += buyer.Data.Quantity.Int64()
+				buyerSteps = append(buyerSteps, struct {
+					price         *big.Int
+					cumulativeQty int64
+				}{
+					price: buyer.Data.Price, cumulativeQty: buyerCumQty,
+				})
 			}
+		}
+
+		// Build seller steps (supply curve - ascending prices)
+		var sellerCumQty int64 = 0
+		for _, seller := range sellers {
+			if seller.Data.Price != nil && seller.Data.Quantity != nil {
+				sellerCumQty += seller.Data.Quantity.Int64()
+				sellerSteps = append(sellerSteps, struct {
+					price         *big.Int
+					cumulativeQty int64
+				}{
+					price: seller.Data.Price, cumulativeQty: sellerCumQty,
+				})
+			}
+		}
+
+		// Find intersection: last step where buyer_price >= seller_price
+		var lastValidBuyerPrice, lastValidSellerPrice *big.Int
+		buyerIdx, sellerIdx := 0, 0
+
+		for buyerIdx < len(buyerSteps) && sellerIdx < len(sellerSteps) {
+			buyerStep := buyerSteps[buyerIdx]
+			sellerStep := sellerSteps[sellerIdx]
+
+			// Check if curves still intersect at this quantity level
+			if buyerStep.price.Cmp(sellerStep.price) >= 0 {
+				// Valid intersection - save these prices
+				lastValidBuyerPrice = buyerStep.price
+				lastValidSellerPrice = sellerStep.price
+
+				// Move to next step based on cumulative quantity
+				if buyerStep.cumulativeQty <= sellerStep.cumulativeQty {
+					buyerIdx++
+				} else {
+					sellerIdx++
+				}
+			} else {
+				// No more intersections
+				break
+			}
+		}
+
+		if lastValidBuyerPrice != nil && lastValidSellerPrice != nil {
+			// Clearing price = average of last intersecting step prices
+			// Note: Using integer division which rounds DOWN (truncates fractional part)
+			sum := new(big.Int).Add(lastValidBuyerPrice, lastValidSellerPrice)
+			clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
+			return clearingPrice, true
 		}
 
 		return nil, false
 	}
 
-	// Helper function to execute trades at clearing price
+	// Helper function to execute trades at clearing price with proper market clearing
 	executeTradesAtClearingPrice := func(buyers, sellers []IndexedParticipant, clearingPrice *big.Int) {
 		// Find qualifying buyers (bid >= clearing price)
 		var qualifiedBuyers []IndexedParticipant
@@ -383,37 +435,170 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 
 		fmt.Printf("Qualified buyers: %d, Qualified sellers: %d\n", len(qualifiedBuyers), len(qualifiedSellers))
 
-		// Execute trades: each participant trades their full quantity
+		// Calculate total qualified demand and supply
+		var totalDemand, totalSupply int64
 		for _, buyer := range qualifiedBuyers {
-			idx := buyer.Index
 			quantity := buyer.Data.Quantity
 			if quantity == nil {
 				quantity = big.NewInt(10) // Default trading quantity
 			}
-			tradingCost := new(big.Int).Mul(clearingPrice, quantity)
-
-			// Buyer: lose coins, gain energy
-			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, tradingCost)
-			outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, quantity)
-
-			fmt.Printf("Buyer %d: paid %v coins for %v energy at price %v\n",
-				idx, tradingCost, quantity, clearingPrice)
+			totalDemand += quantity.Int64()
 		}
 
 		for _, seller := range qualifiedSellers {
-			idx := seller.Index
 			quantity := seller.Data.Quantity
 			if quantity == nil {
 				quantity = big.NewInt(10) // Default trading quantity
 			}
-			tradingRevenue := new(big.Int).Mul(clearingPrice, quantity)
+			totalSupply += quantity.Int64()
+		}
+
+		// Market clearing: trade the minimum of total demand and supply
+		tradeableQuantity := totalDemand
+		if totalSupply < totalDemand {
+			tradeableQuantity = totalSupply
+		}
+
+		fmt.Printf("Market clearing: Total demand=%d, Total supply=%d, Tradeable=%d\n",
+			totalDemand, totalSupply, tradeableQuantity)
+
+		if tradeableQuantity <= 0 {
+			fmt.Printf("No trading occurs - zero tradeable quantity\n")
+			return
+		}
+
+		// Priority-based allocation using price-time priority
+		// Sort buyers by price (descending) - higher bidders get priority
+		sort.Slice(qualifiedBuyers, func(i, j int) bool {
+			if qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) != 0 {
+				return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0
+			}
+			// Tie-breaker: original index (time priority)
+			return qualifiedBuyers[i].Index < qualifiedBuyers[j].Index
+		})
+
+		// Sort sellers by price (ascending) - lower offers get priority
+		sort.Slice(qualifiedSellers, func(i, j int) bool {
+			if qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) != 0 {
+				return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0
+			}
+			// Tie-breaker: original index (time priority)
+			return qualifiedSellers[i].Index < qualifiedSellers[j].Index
+		})
+
+		// Execute trades with proper quantity allocation
+		var totalEnergyTraded int64 = 0
+		var totalCoinsTraded int64 = 0
+
+		// Allocate to buyers (demand side)
+		remainingDemand := tradeableQuantity
+		buyerAllocation := make(map[int]int64) // buyer index -> allocated quantity
+
+		for _, buyer := range qualifiedBuyers {
+			if remainingDemand <= 0 {
+				break
+			}
+
+			quantity := buyer.Data.Quantity
+			if quantity == nil {
+				quantity = big.NewInt(10)
+			}
+			desiredQty := quantity.Int64()
+
+			// Allocate up to desired quantity or remaining demand
+			allocatedQty := desiredQty
+			if allocatedQty > remainingDemand {
+				allocatedQty = remainingDemand
+			}
+
+			buyerAllocation[buyer.Index] = allocatedQty
+			remainingDemand -= allocatedQty
+		}
+
+		// Allocate to sellers (supply side)
+		remainingSupply := tradeableQuantity
+		sellerAllocation := make(map[int]int64) // seller index -> allocated quantity
+
+		for _, seller := range qualifiedSellers {
+			if remainingSupply <= 0 {
+				break
+			}
+
+			quantity := seller.Data.Quantity
+			if quantity == nil {
+				quantity = big.NewInt(10)
+			}
+			desiredQty := quantity.Int64()
+
+			// Allocate up to desired quantity or remaining supply
+			allocatedQty := desiredQty
+			if allocatedQty > remainingSupply {
+				allocatedQty = remainingSupply
+			}
+
+			sellerAllocation[seller.Index] = allocatedQty
+			remainingSupply -= allocatedQty
+		}
+
+		// Execute buyer trades
+		for _, buyer := range qualifiedBuyers {
+			allocatedQty := buyerAllocation[buyer.Index]
+			if allocatedQty <= 0 {
+				continue
+			}
+
+			idx := buyer.Index
+			tradingCost := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
+
+			// Buyer: lose coins, gain energy
+			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, tradingCost)
+			outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, big.NewInt(allocatedQty))
+
+			totalEnergyTraded += allocatedQty
+			totalCoinsTraded += tradingCost.Int64()
+
+			fmt.Printf("Buyer %d: paid %v coins for %d energy at price %v\n",
+				idx, tradingCost, allocatedQty, clearingPrice)
+		}
+
+		// Execute seller trades
+		for _, seller := range qualifiedSellers {
+			allocatedQty := sellerAllocation[seller.Index]
+			if allocatedQty <= 0 {
+				continue
+			}
+
+			idx := seller.Index
+			tradingRevenue := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
 
 			// Seller: gain coins, lose energy
 			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, tradingRevenue)
-			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, quantity)
+			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, big.NewInt(allocatedQty))
 
-			fmt.Printf("Seller %d: sold %v energy for %v coins at price %v\n",
-				idx, quantity, tradingRevenue, clearingPrice)
+			fmt.Printf("Seller %d: sold %d energy for %v coins at price %v\n",
+				idx, allocatedQty, tradingRevenue, clearingPrice)
+		}
+
+		// Verification: ensure conservation laws
+		fmt.Printf("📊 MARKET SUMMARY:\n")
+		fmt.Printf("   Total energy traded: %d units\n", totalEnergyTraded)
+		fmt.Printf("   Total coins exchanged: %d coins\n", totalCoinsTraded)
+		fmt.Printf("   Average execution price: %v coins/unit\n", clearingPrice)
+
+		// Sanity check: all allocations should sum to tradeable quantity
+		var totalBuyerAllocation, totalSellerAllocation int64
+		for _, qty := range buyerAllocation {
+			totalBuyerAllocation += qty
+		}
+		for _, qty := range sellerAllocation {
+			totalSellerAllocation += qty
+		}
+
+		if totalBuyerAllocation != totalSellerAllocation || totalBuyerAllocation != tradeableQuantity {
+			fmt.Printf("⚠️  CONSERVATION ERROR: Buyer allocation=%d, Seller allocation=%d, Expected=%d\n",
+				totalBuyerAllocation, totalSellerAllocation, tradeableQuantity)
+		} else {
+			fmt.Printf("✅ Conservation verified: %d units traded on both sides\n", tradeableQuantity)
 		}
 	}
 
