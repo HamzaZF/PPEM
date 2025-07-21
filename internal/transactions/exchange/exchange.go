@@ -267,21 +267,168 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
 }
 
-// RunAuctionLogic - DUMMY IMPLEMENTATION
-// The actual auction logic has been commented out since it's not correct yet.
-// This dummy function simply returns the inputs unchanged for now.
-// TODO: Implement proper auction logic later
-func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
+// RunAuctionLogic implements a simple double auction mechanism
+// 1. Sort buyers (descending) and sellers (ascending) based on actual roles
+// 2. Find intersection point where buyer_bid >= seller_ask
+// 3. Calculate clearing price as average of intersecting bid/ask
+// 4. Execute trades for all qualifying participants at clearing price
+func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) []DecryptedRegistration {
 	if len(inputs) == 0 {
 		return inputs
 	}
 
-	// Create output array (copy of inputs without any modifications)
+	numParticipants := len(inputs)
+
+	// Create output array (copy of inputs initially)
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
-	fmt.Printf("Auction debug: Using dummy logic - no trading performed\n")
-	fmt.Printf("All participants keep their original balances unchanged\n")
+	// Split into buyers and sellers with their original indices based on actual roles
+	type IndexedParticipant struct {
+		Index int
+		Data  DecryptedRegistration
+	}
+
+	var buyers, sellers []IndexedParticipant
+
+	// Use actual roles from configuration, not assumptions about index ranges
+	for i := 0; i < numParticipants; i++ {
+		participantRole, exists := roles[i]
+		if !exists {
+			// Default to SELL if role not specified (conservative approach)
+			participantRole = zerocash.SELL
+		}
+
+		if participantRole == zerocash.BUY {
+			buyers = append(buyers, IndexedParticipant{Index: i, Data: inputs[i]})
+		} else {
+			sellers = append(sellers, IndexedParticipant{Index: i, Data: inputs[i]})
+		}
+	}
+
+	// Sort buyers by price (descending - highest bid first)
+	sort.Slice(buyers, func(i, j int) bool {
+		if buyers[i].Data.Price == nil && buyers[j].Data.Price == nil {
+			return false
+		}
+		if buyers[i].Data.Price == nil {
+			return false
+		}
+		if buyers[j].Data.Price == nil {
+			return true
+		}
+		return buyers[i].Data.Price.Cmp(buyers[j].Data.Price) > 0
+	})
+
+	// Sort sellers by price (ascending - lowest ask first)
+	sort.Slice(sellers, func(i, j int) bool {
+		if sellers[i].Data.Price == nil && sellers[j].Data.Price == nil {
+			return false
+		}
+		if sellers[i].Data.Price == nil {
+			return true
+		}
+		if sellers[j].Data.Price == nil {
+			return false
+		}
+		return sellers[i].Data.Price.Cmp(sellers[j].Data.Price) < 0
+	})
+
+	// Helper function to find intersection point
+	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, bool) {
+		if len(buyers) == 0 || len(sellers) == 0 {
+			return nil, false
+		}
+
+		// Find intersection: first point where buyer_bid >= seller_ask
+		for i := 0; i < len(buyers); i++ {
+			for j := 0; j < len(sellers); j++ {
+				buyerBid := buyers[i].Data.Price
+				sellerAsk := sellers[j].Data.Price
+
+				if buyerBid == nil || sellerAsk == nil {
+					continue
+				}
+
+				// Check if curves intersect: buyer willing to pay >= seller willing to accept
+				if buyerBid.Cmp(sellerAsk) >= 0 {
+					// Clearing price = average of intersecting bid and ask
+					sum := new(big.Int).Add(buyerBid, sellerAsk)
+					clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
+					return clearingPrice, true
+				}
+			}
+		}
+
+		return nil, false
+	}
+
+	// Helper function to execute trades at clearing price
+	executeTradesAtClearingPrice := func(buyers, sellers []IndexedParticipant, clearingPrice *big.Int) {
+		// Find qualifying buyers (bid >= clearing price)
+		var qualifiedBuyers []IndexedParticipant
+		for _, buyer := range buyers {
+			if buyer.Data.Price != nil && buyer.Data.Price.Cmp(clearingPrice) >= 0 {
+				qualifiedBuyers = append(qualifiedBuyers, buyer)
+			}
+		}
+
+		// Find qualifying sellers (ask <= clearing price)
+		var qualifiedSellers []IndexedParticipant
+		for _, seller := range sellers {
+			if seller.Data.Price != nil && seller.Data.Price.Cmp(clearingPrice) <= 0 {
+				qualifiedSellers = append(qualifiedSellers, seller)
+			}
+		}
+
+		fmt.Printf("Qualified buyers: %d, Qualified sellers: %d\n", len(qualifiedBuyers), len(qualifiedSellers))
+
+		// Execute trades: each participant trades their full quantity
+		for _, buyer := range qualifiedBuyers {
+			idx := buyer.Index
+			quantity := buyer.Data.Quantity
+			if quantity == nil {
+				quantity = big.NewInt(10) // Default trading quantity
+			}
+			tradingCost := new(big.Int).Mul(clearingPrice, quantity)
+
+			// Buyer: lose coins, gain energy
+			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, tradingCost)
+			outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, quantity)
+
+			fmt.Printf("Buyer %d: paid %v coins for %v energy at price %v\n",
+				idx, tradingCost, quantity, clearingPrice)
+		}
+
+		for _, seller := range qualifiedSellers {
+			idx := seller.Index
+			quantity := seller.Data.Quantity
+			if quantity == nil {
+				quantity = big.NewInt(10) // Default trading quantity
+			}
+			tradingRevenue := new(big.Int).Mul(clearingPrice, quantity)
+
+			// Seller: gain coins, lose energy
+			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, tradingRevenue)
+			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, quantity)
+
+			fmt.Printf("Seller %d: sold %v energy for %v coins at price %v\n",
+				idx, quantity, tradingRevenue, clearingPrice)
+		}
+	}
+
+	// Find intersection point
+	clearingPrice, tradingOccurs := findClearingPrice(buyers, sellers)
+
+	if !tradingOccurs {
+		fmt.Printf("Auction debug: No intersection found - no trading occurs\n")
+		return outputs
+	}
+
+	fmt.Printf("Auction debug: Clearing price found = %v\n", clearingPrice)
+
+	// Execute trades for qualifying participants
+	executeTradesAtClearingPrice(buyers, sellers, clearingPrice)
 
 	return outputs
 }
@@ -774,6 +921,7 @@ func ExchangePhaseWithNotes(
 	participantECDHPubKeys []*ecdh.PublicKey,
 	participantDHKeys []*bls12377_fr.Element,
 	auctioneerDHPk *bls12377.G1Affine,
+	roles map[int]zerocash.OrderType,
 	ledger *zerocash.Ledger,
 	params *zerocash.Params,
 	pk groth16.ProvingKey,
@@ -852,7 +1000,7 @@ func ExchangePhaseWithNotes(
 	fmt.Printf("\n")
 
 	// 5. Run auction logic with sorted data - sophisticated sealed-bid double auction mechanism
-	outputs := RunAuctionLogic(sortedInputs)
+	outputs := RunAuctionLogic(sortedInputs, roles)
 
 	// 6. Build witness using the dynamic circuit approach with sorted data
 	// Convert auctioneerDHPk from *bls12377.G1Affine to *sw_bls12377.G1Affine

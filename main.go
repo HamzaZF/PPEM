@@ -555,6 +555,7 @@ func executeExchangePhase(state *ProtocolState) error {
 		participantECDHPubKeys,
 		participantDHPrivKeys,   // REAL DH private keys (not shortcuts!)
 		state.AuctioneerDHKp.Pk, // REAL auctioneer public key
+		state.Config.Roles,      // Participant roles (BUY/SELL)
 		state.Ledger,
 		&zerocash.Params{},
 		pk,
