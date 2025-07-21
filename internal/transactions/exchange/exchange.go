@@ -42,7 +42,8 @@ type RegistrationPayload struct {
 type DecryptedRegistration struct {
 	PkOut    *big.Int       // Output public key
 	SkIn     *big.Int       // Input secret key
-	Bid      *big.Int       // Bid (for buyers) or ask (for sellers)
+	Price    *big.Int       // Order price (bid for buyers, ask for sellers)
+	Quantity *big.Int       // Order quantity (amount of energy to trade)
 	Coins    *big.Int       // Coin balance
 	Energy   *big.Int       // Energy balance
 	NoteData *zerocash.Note // Decrypted note from CreateTx (optional)
@@ -75,11 +76,12 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 		decrypted := DecZKRegGo(payload.Ciphertext, *shared)
 
 		result := DecryptedRegistration{
-			PkOut:  decrypted[0], // pk^out
-			SkIn:   decrypted[1], // sk^in
-			Bid:    decrypted[2], // bid
-			Coins:  decrypted[3], // coins
-			Energy: decrypted[4], // energy
+			PkOut:    decrypted[0],   // pk^out
+			SkIn:     decrypted[1],   // sk^in
+			Price:    decrypted[2],   // price (formerly bid)
+			Quantity: big.NewInt(10), // TODO: quantity not yet encrypted, using default
+			Coins:    decrypted[3],   // coins
+			Energy:   decrypted[4],   // energy
 		}
 
 		// Note: Note data decryption is handled by DecryptTransactionNotes function
@@ -171,36 +173,36 @@ func SortParticipantsForCircuit(
 		}
 	}
 
-	// Sort buyers in descending order by bid (highest bid first)
+	// Sort buyers in descending order by price (highest price first)
 	sort.Slice(buyers, func(i, j int) bool {
-		bidI := buyers[i].Input.Bid
-		bidJ := buyers[j].Input.Bid
-		if bidI == nil && bidJ == nil {
+		priceI := buyers[i].Input.Price
+		priceJ := buyers[j].Input.Price
+		if priceI == nil && priceJ == nil {
 			return false
 		}
-		if bidI == nil {
+		if priceI == nil {
 			return false
 		}
-		if bidJ == nil {
+		if priceJ == nil {
 			return true
 		}
-		return bidI.Cmp(bidJ) > 0 // Descending order
+		return priceI.Cmp(priceJ) > 0 // Descending order
 	})
 
-	// Sort sellers in ascending order by bid (lowest ask first)
+	// Sort sellers in ascending order by price (lowest ask first)
 	sort.Slice(sellers, func(i, j int) bool {
-		bidI := sellers[i].Input.Bid
-		bidJ := sellers[j].Input.Bid
-		if bidI == nil && bidJ == nil {
+		priceI := sellers[i].Input.Price
+		priceJ := sellers[j].Input.Price
+		if priceI == nil && priceJ == nil {
 			return false
 		}
-		if bidI == nil {
+		if priceI == nil {
 			return true
 		}
-		if bidJ == nil {
+		if priceJ == nil {
 			return false
 		}
-		return bidI.Cmp(bidJ) < 0 // Ascending order
+		return priceI.Cmp(priceJ) < 0 // Ascending order
 	})
 
 	// Reconstruct the sorted arrays
@@ -265,6 +267,27 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
 }
 
+// RunAuctionLogic - DUMMY IMPLEMENTATION
+// The actual auction logic has been commented out since it's not correct yet.
+// This dummy function simply returns the inputs unchanged for now.
+// TODO: Implement proper auction logic later
+func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
+	if len(inputs) == 0 {
+		return inputs
+	}
+
+	// Create output array (copy of inputs without any modifications)
+	outputs := make([]DecryptedRegistration, len(inputs))
+	copy(outputs, inputs)
+
+	fmt.Printf("Auction debug: Using dummy logic - no trading performed\n")
+	fmt.Printf("All participants keep their original balances unchanged\n")
+
+	return outputs
+}
+
+/*
+// COMMENTED OUT: Original auction logic (not correct, will be reworked later)
 // RunAuctionLogic implements the same auction logic as the circuit.
 // This matches the circuit's clearing price mechanism exactly.
 // Input must be pre-sorted by SortParticipantsForCircuit.
@@ -281,12 +304,12 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
-	// Define clearing price as the bid of buyer number N/4 (matches circuit logic)
+	// Define clearing price as the price of buyer number N/4 (matches circuit logic)
 	clearingPriceIdx := halfN / 2
-	if clearingPriceIdx >= len(inputs) || inputs[clearingPriceIdx].Bid == nil {
+	if clearingPriceIdx >= len(inputs) || inputs[clearingPriceIdx].Price == nil {
 		return outputs // No clearing price available
 	}
-	clearingPrice := new(big.Int).Set(inputs[clearingPriceIdx].Bid)
+	clearingPrice := new(big.Int).Set(inputs[clearingPriceIdx].Price)
 
 	// Fixed trading volume (same as circuit TRADING_VOLUME constant)
 	tradingVolume := big.NewInt(TRADING_VOLUME)
@@ -297,8 +320,8 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 		if i < halfN {
 			// This is a buyer (index 0 to N/2-1)
 			// Buyer qualifies if their bid >= clearing price
-			qualified := inputs[i].Bid != nil && inputs[i].Bid.Cmp(clearingPrice) >= 0
-			fmt.Printf("Buyer %d: bid=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Bid, clearingPrice, qualified, inputs[i].Energy)
+			qualified := inputs[i].Price != nil && inputs[i].Price.Cmp(clearingPrice) >= 0
+			fmt.Printf("Buyer %d: bid=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Price, clearingPrice, qualified, inputs[i].Energy)
 
 			if qualified {
 				// Calculate trading cost
@@ -314,8 +337,8 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 		} else {
 			// This is a seller (index N/2 to N-1)
 			// Seller qualifies if their ask <= clearing price
-			qualified := inputs[i].Bid != nil && inputs[i].Bid.Cmp(clearingPrice) <= 0
-			fmt.Printf("Seller %d: ask=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Bid, clearingPrice, qualified, inputs[i].Energy)
+			qualified := inputs[i].Price != nil && inputs[i].Price.Cmp(clearingPrice) <= 0
+			fmt.Printf("Seller %d: ask=%v, clearing=%v, qualified=%v, inEnergy=%v\n", i, inputs[i].Price, clearingPrice, qualified, inputs[i].Energy)
 
 			if qualified {
 				// Calculate trading revenue
@@ -333,6 +356,7 @@ func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
 
 	return outputs
 }
+*/
 
 // ExchangeTransaction represents the transaction output of the exchange phase.
 // Contains all inputs, outputs, and proof data for the auction.
@@ -494,10 +518,10 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 			}
 			return in.SkIn
 		case "bid":
-			if in.Bid == nil {
+			if in.Price == nil {
 				return big.NewInt(10) // Default value
 			}
-			return in.Bid
+			return in.Price
 		default:
 			return big.NewInt(0)
 		}
@@ -784,7 +808,7 @@ func ExchangePhaseWithNotes(
 		inputs[i] = DecryptedRegistration{
 			PkOut:    regInputs[i].PkOut,
 			SkIn:     regInputs[i].SkIn,
-			Bid:      regInputs[i].Bid,
+			Price:    regInputs[i].Price,
 			Coins:    regInputs[i].Coins,
 			Energy:   regInputs[i].Energy,
 			NoteData: noteInputs[i].NoteData, // Note data from CreateTx
@@ -809,16 +833,18 @@ func ExchangePhaseWithNotes(
 	halfN := len(sortedInputs) / 2
 	fmt.Printf("  Buyers (descending by bid): ")
 	for i := 0; i < halfN; i++ {
-		if sortedInputs[i].Bid != nil {
-			fmt.Printf("%s ", sortedInputs[i].Bid.String())
+		if sortedInputs[i].Price != nil {
+			fmt.Printf("%s ", sortedInputs[i].Price.String())
 		} else {
 			fmt.Printf("nil ")
 		}
 	}
-	fmt.Printf("\n  Sellers (ascending by bid): ")
+	fmt.Println()
+
+	fmt.Print("Sellers: ")
 	for i := halfN; i < len(sortedInputs); i++ {
-		if sortedInputs[i].Bid != nil {
-			fmt.Printf("%s ", sortedInputs[i].Bid.String())
+		if sortedInputs[i].Price != nil {
+			fmt.Printf("%s ", sortedInputs[i].Price.String())
 		} else {
 			fmt.Printf("nil ")
 		}
@@ -857,8 +883,8 @@ func ExchangePhaseWithNotes(
 		if input.Energy != nil {
 			totalEnergy.Add(totalEnergy, input.Energy)
 		}
-		if input.Bid != nil && input.Bid.Cmp(highestBid) > 0 {
-			highestBid.Set(input.Bid)
+		if input.Price != nil && input.Price.Cmp(highestBid) > 0 {
+			highestBid.Set(input.Price)
 			winnerID = fmt.Sprintf("Participant%d", i+1)
 		}
 	}

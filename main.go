@@ -35,7 +35,7 @@ type MarketConfig struct {
 	Roles         map[int]zerocash.OrderType `json:"roles"`
 	InitialCoins  []int64                    `json:"initial_coins"`
 	InitialEnergy []int64                    `json:"initial_energy"`
-	BidPrices     []int64                    `json:"bid_prices"`
+	Orders        []zerocash.EnergyOrder     `json:"orders"`
 
 	// Withdrawal scenario configuration
 	WithdrawalMode string `json:"withdrawal_mode"` // "none", "emergency", "selective"
@@ -59,10 +59,22 @@ func createDefaultMarketConfig() MarketConfig {
 		InitialCoins:  []int64{1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900},
 		InitialEnergy: []int64{50, 60, 70, 80, 90, 100, 110, 120, 130, 140},
 
-		// Bid prices: buyers willing to pay more, sellers asking for less (enables trades)
-		// Buyers (0-4): 60, 55, 50, 45, 40 (descending - high to low willingness to pay)
-		// Sellers (5-9): 30, 35, 40, 45, 50 (ascending - low to high asking price)
-		BidPrices: []int64{60, 55, 50, 45, 40, 30, 35, 40, 45, 50},
+		// Orders: buyers willing to pay more, sellers asking for less (enables trades)
+		// Buyers (0-4): prices 60, 55, 50, 45, 40 (descending - high to low willingness to pay)
+		// Sellers (5-9): prices 30, 35, 40, 45, 50 (ascending - low to high asking price)
+		// Each participant wants to trade 10 units of energy
+		Orders: []zerocash.EnergyOrder{
+			{Type: zerocash.BUY, Price: big.NewInt(60), Quantity: big.NewInt(10)},  // Buyer 0
+			{Type: zerocash.BUY, Price: big.NewInt(55), Quantity: big.NewInt(10)},  // Buyer 1
+			{Type: zerocash.BUY, Price: big.NewInt(50), Quantity: big.NewInt(10)},  // Buyer 2
+			{Type: zerocash.BUY, Price: big.NewInt(45), Quantity: big.NewInt(10)},  // Buyer 3
+			{Type: zerocash.BUY, Price: big.NewInt(40), Quantity: big.NewInt(10)},  // Buyer 4
+			{Type: zerocash.SELL, Price: big.NewInt(30), Quantity: big.NewInt(10)}, // Seller 5
+			{Type: zerocash.SELL, Price: big.NewInt(35), Quantity: big.NewInt(10)}, // Seller 6
+			{Type: zerocash.SELL, Price: big.NewInt(40), Quantity: big.NewInt(10)}, // Seller 7
+			{Type: zerocash.SELL, Price: big.NewInt(45), Quantity: big.NewInt(10)}, // Seller 8
+			{Type: zerocash.SELL, Price: big.NewInt(50), Quantity: big.NewInt(10)}, // Seller 9
+		},
 
 		// No withdrawal by default (normal market operation)
 		WithdrawalMode: "none",
@@ -94,7 +106,7 @@ func createMarketConfigForN(n int) MarketConfig {
 	// Create initial balances
 	initialCoins := make([]int64, n)
 	initialEnergy := make([]int64, n)
-	bidPrices := make([]int64, n)
+	orders := make([]zerocash.EnergyOrder, n)
 
 	for i := 0; i < n; i++ {
 		initialCoins[i] = int64(1000 + i*100)
@@ -102,18 +114,26 @@ func createMarketConfigForN(n int) MarketConfig {
 		initialEnergy[i] = 100
 	}
 
-	// Set bid prices according to the specified pattern:
+	// Set order prices according to the specified pattern:
 	// Buyers' bids (already sorted): [N/2, N/2-1, ..., 1] (descending)
 	// Sellers' asks (already sorted): [1, ..., N/2-1, N/2] (ascending)
 
 	// For buyers (indices 0 to N/2-1): bids [N/2, N/2-1, ..., 1]
 	for i := 0; i < halfN; i++ {
-		bidPrices[i] = int64(halfN - i) // N/2, N/2-1, ..., 1
+		orders[i] = zerocash.EnergyOrder{
+			Type:     zerocash.BUY,
+			Price:    big.NewInt(int64(halfN - i)), // N/2, N/2-1, ..., 1
+			Quantity: big.NewInt(10),               // Standard quantity of 10 units
+		}
 	}
 
 	// For sellers (indices N/2 to N-1): asks [1, ..., N/2-1, N/2]
 	for i := halfN; i < n; i++ {
-		bidPrices[i] = int64(i - halfN + 1) // 1, 2, ..., N/2
+		orders[i] = zerocash.EnergyOrder{
+			Type:     zerocash.SELL,
+			Price:    big.NewInt(int64(i - halfN + 1)), // 1, 2, ..., N/2
+			Quantity: big.NewInt(10),                   // Standard quantity of 10 units
+		}
 	}
 
 	return MarketConfig{
@@ -122,7 +142,7 @@ func createMarketConfigForN(n int) MarketConfig {
 		Roles:           roles,
 		InitialCoins:    initialCoins,
 		InitialEnergy:   initialEnergy,
-		BidPrices:       bidPrices,
+		Orders:          orders,
 		WithdrawalMode:  "none",
 		WithdrawAll:     false,
 		WithdrawList:    []int{},
@@ -149,9 +169,9 @@ func validateConfig(config MarketConfig) error {
 			len(config.InitialEnergy), config.NumParticipants)
 	}
 
-	if len(config.BidPrices) != config.NumParticipants {
-		return fmt.Errorf("bid prices array length (%d) must match number of participants (%d)",
-			len(config.BidPrices), config.NumParticipants)
+	if len(config.Orders) != config.NumParticipants {
+		return fmt.Errorf("orders array length (%d) must match number of participants (%d)",
+			len(config.Orders), config.NumParticipants)
 	}
 
 	if len(config.Roles) != config.NumParticipants {
@@ -192,7 +212,7 @@ type ProtocolState struct {
 	Participants  []*zerocash.Participant
 	BaseNotes     []*zerocash.Note
 	BaseNoteKeys  [][]byte
-	Bids          []*big.Int
+	OrderPrices   []*big.Int // Order prices for each participant
 	SharedSecrets []*bls12377.G1Affine
 
 	// Protocol execution data
@@ -270,7 +290,7 @@ func main() {
 		Participants:       make([]*zerocash.Participant, config.NumParticipants),
 		BaseNotes:          make([]*zerocash.Note, config.NumParticipants),
 		BaseNoteKeys:       make([][]byte, config.NumParticipants),
-		Bids:               make([]*big.Int, config.NumParticipants),
+		OrderPrices:        make([]*big.Int, config.NumParticipants),
 		SharedSecrets:      make([]*bls12377.G1Affine, config.NumParticipants),
 		ParticipantSkIn:    make([]*big.Int, config.NumParticipants),
 		ParticipantPkIn:    make([]*big.Int, config.NumParticipants),
@@ -381,7 +401,7 @@ func setupProtocol(state *ProtocolState) error {
 		// Create initial energy market note using configuration
 		coins := big.NewInt(state.Config.InitialCoins[i])
 		energy := big.NewInt(state.Config.InitialEnergy[i])
-		state.Bids[i] = big.NewInt(state.Config.BidPrices[i])
+		state.OrderPrices[i] = new(big.Int).Set(state.Config.Orders[i].Price)
 
 		// Generate secret key for the base note
 		state.BaseNoteKeys[i] = zerocash.RandomBytesPublic(32)
@@ -422,11 +442,11 @@ func executeRegistrationPhase(state *ProtocolState) error {
 	for i := 0; i < state.Config.NumParticipants; i++ {
 		role := state.Config.Roles[i]
 		roleStr := role.String()
-		var bidMeaning string
+		var orderMeaning string
 		if role == zerocash.BUY {
-			bidMeaning = fmt.Sprintf("max willing to pay %s coins/unit", state.Bids[i].String())
+			orderMeaning = fmt.Sprintf("max willing to pay %s coins/unit", state.OrderPrices[i].String())
 		} else {
-			bidMeaning = fmt.Sprintf("min willing to accept %s coins/unit", state.Bids[i].String())
+			orderMeaning = fmt.Sprintf("min willing to accept %s coins/unit", state.OrderPrices[i].String())
 		}
 
 		fmt.Printf("Participant %d (%s): ", i+1, roleStr)
@@ -436,7 +456,7 @@ func executeRegistrationPhase(state *ProtocolState) error {
 		registerResult, err := register.Register(
 			state.Participants[i],
 			state.BaseNotes[i],
-			state.Bids[i],
+			state.OrderPrices[i],
 			state.CircuitKeys.pkTx,
 			state.CircuitKeys.ccsTx,
 			state.CircuitKeys.pkReg,
@@ -478,7 +498,7 @@ func executeRegistrationPhase(state *ProtocolState) error {
 			len(state.RegistrationProofs[i]),
 			state.BaseNotes[i].Value.Coins.String(),
 			state.BaseNotes[i].Value.Energy.String(),
-			bidMeaning)
+			orderMeaning)
 	}
 
 	fmt.Printf("Registration complete: %d/%d participants registered\n",
@@ -708,7 +728,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			outNote,
 			pkT,
 			cipherAux,
-			state.Bids[participantID],
+			state.OrderPrices[participantID],
 			sharedSecretGnark,
 			withdrawalKeys.pkWithdraw,
 			withdrawalKeys.ccsWithdraw,

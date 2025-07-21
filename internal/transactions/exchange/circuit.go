@@ -231,85 +231,85 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		api.AssertIsEqual(c.InPk[coin], pk)
 	}
 
-	// --- Verify auction sorting constraints ---
-	// First half (0 to N/2-1) are buyers: DecVal[i][2] should be in descending order (highest bid first)
-	// Second half (N/2 to N-1) are sellers: DecVal[i][2] should be in ascending order (lowest ask first)
-	halfN := c.N / 2
+	// // --- Verify auction sorting constraints ---
+	// // First half (0 to N/2-1) are buyers: DecVal[i][2] should be in descending order (highest bid first)
+	// // Second half (N/2 to N-1) are sellers: DecVal[i][2] should be in ascending order (lowest ask first)
+	// halfN := c.N / 2
 
-	// Verify buyers are sorted in descending order (highest bid first)
-	for i := 0; i < halfN-1; i++ {
-		// For buyers: DecVal[i][2] >= DecVal[i+1][2]
-		// Use api.AssertIsLessOrEqual to verify DecVal[i+1][2] <= DecVal[i][2]
-		api.AssertIsLessOrEqual(c.DecVal[i+1][2], c.DecVal[i][2])
-	}
+	// // Verify buyers are sorted in descending order (highest bid first)
+	// for i := 0; i < halfN-1; i++ {
+	// 	// For buyers: DecVal[i][2] >= DecVal[i+1][2]
+	// 	// Use api.AssertIsLessOrEqual to verify DecVal[i+1][2] <= DecVal[i][2]
+	// 	api.AssertIsLessOrEqual(c.DecVal[i+1][2], c.DecVal[i][2])
+	// }
 
-	// Verify sellers are sorted in ascending order (lowest ask first)
-	for i := halfN; i < c.N-1; i++ {
-		// For sellers: DecVal[i][2] <= DecVal[i+1][2]
-		api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
-	}
+	// // Verify sellers are sorted in ascending order (lowest ask first)
+	// for i := halfN; i < c.N-1; i++ {
+	// 	// For sellers: DecVal[i][2] <= DecVal[i+1][2]
+	// 	api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
+	// }
 
-	// --- Implement auction trading logic ---
-	// Define clearing price as the bid of buyer number N/4
-	clearingPrice := c.DecVal[halfN/2][2]
+	// // --- Implement auction trading logic ---
+	// // Define clearing price as the bid of buyer number N/4
+	// clearingPrice := c.DecVal[halfN/2][2]
 
-	// Process trading for all participants
-	for i := 0; i < c.N; i++ {
-		if i < halfN {
-			// This is a buyer (index 0 to N/2-1)
-			// Buyer qualifies if their bid >= clearing price
+	// // Process trading for all participants
+	// for i := 0; i < c.N; i++ {
+	// 	if i < halfN {
+	// 		// This is a buyer (index 0 to N/2-1)
+	// 		// Buyer qualifies if their bid >= clearing price
 
-			// Calculate what the output should be
-			tradingCost := api.Mul(clearingPrice, TRADING_VOLUME)
-			coinAfterTrade := api.Sub(c.InCoin[i], tradingCost)
-			energyAfterTrade := api.Add(c.InEnergy[i], TRADING_VOLUME)
+	// 		// Calculate what the output should be
+	// 		tradingCost := api.Mul(clearingPrice, TRADING_VOLUME)
+	// 		coinAfterTrade := api.Sub(c.InCoin[i], tradingCost)
+	// 		energyAfterTrade := api.Add(c.InEnergy[i], TRADING_VOLUME)
 
-			// // Simplified qualification: bid >= clearing price
-			// // If (bid - clearing) >= 0, then qualified = 1, else qualified = 0
-			// bidDiff := api.Sub(c.DecVal[i][2], clearingPrice)
-			// //qualified := api.IsZero(api.IsZero(bidDiff)) // This gives 1 if bidDiff >= 0
+	// 		// // Simplified qualification: bid >= clearing price
+	// 		// // If (bid - clearing) >= 0, then qualified = 1, else qualified = 0
+	// 		// bidDiff := api.Sub(c.DecVal[i][2], clearingPrice)
+	// 		// //qualified := api.IsZero(api.IsZero(bidDiff)) // This gives 1 if bidDiff >= 0
 
-			// qualified := api.IsZero(api.Sub(0, api.IsZero(bidDiff)))
+	// 		// qualified := api.IsZero(api.Sub(0, api.IsZero(bidDiff)))
 
-			// Buyer qualifies if bid >= clearing price
-			// api.Cmp(bid, clearingPrice) returns 1 if bid > clearing, 0 if equal, -1 if bid < clearing
-			// We want 1 if qualified (bid >= clearing), 0 otherwise
-			cmpResult := api.Cmp(c.DecVal[i][2], clearingPrice)
+	// 		// Buyer qualifies if bid >= clearing price
+	// 		// api.Cmp(bid, clearingPrice) returns 1 if bid > clearing, 0 if equal, -1 if bid < clearing
+	// 		// We want 1 if qualified (bid >= clearing), 0 otherwise
+	// 		cmpResult := api.Cmp(c.DecVal[i][2], clearingPrice)
 
-			qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
+	// 		qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
 
-			// Compute expected outputs based on qualification
-			expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
-			expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
+	// 		// Compute expected outputs based on qualification
+	// 		expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
+	// 		expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
 
-			// Assert that the claimed outputs match our computation
-			api.AssertIsEqual(c.OutCoin[i], expectedCoin)
-			api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
-		} else {
-			// This is a seller (index N/2 to N-1)
-			// Seller qualifies if their ask <= clearing price
+	// 		// Assert that the claimed outputs match our computation
+	// 		api.AssertIsEqual(c.OutCoin[i], expectedCoin)
+	// 		api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
+	// 	} else {
+	// 		// This is a seller (index N/2 to N-1)
+	// 		// Seller qualifies if their ask <= clearing price
 
-			// Calculate what the output should be
-			tradingRevenue := api.Mul(clearingPrice, TRADING_VOLUME)
-			coinAfterTrade := api.Add(c.InCoin[i], tradingRevenue)
-			energyAfterTrade := api.Sub(c.InEnergy[i], TRADING_VOLUME)
+	// 		// Calculate what the output should be
+	// 		tradingRevenue := api.Mul(clearingPrice, TRADING_VOLUME)
+	// 		coinAfterTrade := api.Add(c.InCoin[i], tradingRevenue)
+	// 		energyAfterTrade := api.Sub(c.InEnergy[i], TRADING_VOLUME)
 
-			// Seller qualifies if ask <= clearing price
-			// api.Cmp(clearingPrice, ask) returns 1 if clearing > ask, 0 if equal, -1 if clearing < ask
-			// We want 1 if qualified (ask <= clearing), 0 otherwise
-			cmpResult := api.Cmp(clearingPrice, c.DecVal[i][2])
-			qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
-			//qualified := api.IsZero(api.Sub(1, cmpResult)) // 1 if cmpResult >= 0, 0 otherwise
+	// 		// Seller qualifies if ask <= clearing price
+	// 		// api.Cmp(clearingPrice, ask) returns 1 if clearing > ask, 0 if equal, -1 if clearing < ask
+	// 		// We want 1 if qualified (ask <= clearing), 0 otherwise
+	// 		cmpResult := api.Cmp(clearingPrice, c.DecVal[i][2])
+	// 		qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
+	// 		//qualified := api.IsZero(api.Sub(1, cmpResult)) // 1 if cmpResult >= 0, 0 otherwise
 
-			// Compute expected outputs based on qualification
-			expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
-			expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
+	// 		// Compute expected outputs based on qualification
+	// 		expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
+	// 		expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
 
-			// Assert that the claimed outputs match our computation
-			api.AssertIsEqual(c.OutCoin[i], expectedCoin)
-			api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
-		}
-	}
+	// 		// Assert that the claimed outputs match our computation
+	// 		api.AssertIsEqual(c.OutCoin[i], expectedCoin)
+	// 		api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
+	// 	}
+	// }
 
 	return nil
 }
