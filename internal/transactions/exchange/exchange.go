@@ -131,14 +131,13 @@ func SortParticipantsForCircuit(
 	inputs []DecryptedRegistration,
 	payloads []RegistrationPayload,
 	participantDHKeys []*bls12377_fr.Element,
+	roles map[int]zerocash.OrderType,
 ) ([]DecryptedRegistration, []RegistrationPayload, []*bls12377_fr.Element, error) {
 
 	n := len(inputs)
 	if n%2 != 0 {
 		return nil, nil, nil, fmt.Errorf("number of participants must be even, got %d", n)
 	}
-
-	halfN := n / 2
 
 	// Create pairs of (index, data) for sorting
 	type ParticipantData struct {
@@ -148,10 +147,8 @@ func SortParticipantsForCircuit(
 		DHKey   *bls12377_fr.Element
 	}
 
-	// Split participants into buyers and sellers based on their index
-	// First N/2 are buyers, last N/2 are sellers
-	buyers := make([]ParticipantData, halfN)
-	sellers := make([]ParticipantData, halfN)
+	// Split participants into buyers and sellers based on ACTUAL roles
+	var buyers, sellers []ParticipantData
 
 	for i := 0; i < n; i++ {
 		var dhKey *bls12377_fr.Element
@@ -166,10 +163,17 @@ func SortParticipantsForCircuit(
 			DHKey:   dhKey,
 		}
 
-		if i < halfN {
-			buyers[i] = data
+		// Use actual roles from configuration, not index assumptions
+		participantRole, exists := roles[i]
+		if !exists {
+			// Default to SELL if role not specified (conservative approach)
+			participantRole = zerocash.SELL
+		}
+
+		if participantRole == zerocash.BUY {
+			buyers = append(buyers, data)
 		} else {
-			sellers[i-halfN] = data
+			sellers = append(sellers, data)
 		}
 	}
 
@@ -210,16 +214,16 @@ func SortParticipantsForCircuit(
 	sortedPayloads := make([]RegistrationPayload, n)
 	sortedDHKeys := make([]*bls12377_fr.Element, n)
 
-	// Add buyers first (indices 0 to N/2-1)
+	// Add buyers first (indices 0 to len(buyers)-1)
 	for i, buyer := range buyers {
 		sortedInputs[i] = buyer.Input
 		sortedPayloads[i] = buyer.Payload
 		sortedDHKeys[i] = buyer.DHKey
 	}
 
-	// Add sellers last (indices N/2 to N-1)
+	// Add sellers last (indices len(buyers) to n-1)
 	for i, seller := range sellers {
-		idx := halfN + i
+		idx := len(buyers) + i
 		sortedInputs[idx] = seller.Input
 		sortedPayloads[idx] = seller.Payload
 		sortedDHKeys[idx] = seller.DHKey
@@ -312,7 +316,7 @@ func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int
 
 	var buyers, sellers []IndexedParticipant
 
-	// Use actual roles from configuration, not assumptions about index ranges
+	// Use actual roles from configuration
 	for i := 0; i < numParticipants; i++ {
 		participantRole, exists := roles[i]
 		if !exists {
@@ -579,8 +583,14 @@ func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int
 			tradingCost := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
 
 			// Calculate commission for this trade (commission per unit * quantity)
+			// Note: Commission is split between buyer and seller, so each pays half
 			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
-			totalCostWithCommission := new(big.Int).Add(tradingCost, tradeCommission)
+			halfCommission := new(big.Int).Div(tradeCommission, big.NewInt(2))
+			// Handle odd commission by giving the remainder to the buyer
+			commissionRemainder := new(big.Int).Mod(tradeCommission, big.NewInt(2))
+			buyerCommission := new(big.Int).Add(halfCommission, commissionRemainder)
+
+			totalCostWithCommission := new(big.Int).Add(tradingCost, buyerCommission)
 
 			// Buyer: lose coins (including commission), gain energy
 			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, totalCostWithCommission)
@@ -590,7 +600,7 @@ func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int
 			totalCoinsTraded += totalCostWithCommission.Int64()
 
 			fmt.Printf("Buyer %d: paid %v coins (%v trade + %v commission) for %d energy at price %v\n",
-				idx, totalCostWithCommission, tradingCost, tradeCommission, allocatedQty, clearingPrice)
+				idx, totalCostWithCommission, tradingCost, buyerCommission, allocatedQty, clearingPrice)
 		}
 
 		// Execute seller trades
@@ -604,15 +614,18 @@ func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int
 			tradingRevenue := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
 
 			// Calculate commission for this trade (commission per unit * quantity)
+			// Note: Commission is split between buyer and seller, so each pays half
 			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
-			netRevenue := new(big.Int).Sub(tradingRevenue, tradeCommission)
+			sellerCommission := new(big.Int).Div(tradeCommission, big.NewInt(2))
+
+			netRevenue := new(big.Int).Sub(tradingRevenue, sellerCommission)
 
 			// Seller: gain coins (minus commission), lose energy
 			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, netRevenue)
 			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, big.NewInt(allocatedQty))
 
 			fmt.Printf("Seller %d: sold %d energy for %v coins (%v revenue - %v commission) at price %v\n",
-				idx, allocatedQty, netRevenue, tradingRevenue, tradeCommission, clearingPrice)
+				idx, allocatedQty, netRevenue, tradingRevenue, sellerCommission, clearingPrice)
 		}
 
 		// Verification: ensure conservation laws
@@ -1219,8 +1232,8 @@ func ExchangePhaseWithNotes(
 	}
 
 	// 4. Sort participants according to circuit requirements
-	// First N/2 are buyers (descending by bid), last N/2 are sellers (ascending by bid)
-	sortedInputs, sortedPayloads, sortedDHKeys, err := SortParticipantsForCircuit(inputs, regPayloads, participantDHKeys)
+	// Buyers first (descending by bid), then sellers (ascending by bid) based on actual roles
+	sortedInputs, sortedPayloads, sortedDHKeys, err := SortParticipantsForCircuit(inputs, regPayloads, participantDHKeys, roles)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to sort participants for circuit: %w", err)
 	}

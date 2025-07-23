@@ -49,10 +49,10 @@ func createDefaultMarketConfig() MarketConfig {
 		NumParticipants: 10,
 		AuctionType:     "sealed-bid-double-auction",
 
-		// Participant roles: first 5 are buyers, last 5 are sellers
+		// Participant roles: mixed buyers and sellers (not just first half/second half)
 		Roles: map[int]zerocash.OrderType{
-			0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY,
-			5: zerocash.SELL, 6: zerocash.SELL, 7: zerocash.SELL, 8: zerocash.SELL, 9: zerocash.SELL,
+			0: zerocash.BUY, 1: zerocash.SELL, 2: zerocash.BUY, 3: zerocash.SELL, 4: zerocash.BUY,
+			5: zerocash.SELL, 6: zerocash.BUY, 7: zerocash.SELL, 8: zerocash.BUY, 9: zerocash.SELL,
 		},
 
 		// Initial balances: increasing coins and energy
@@ -83,7 +83,7 @@ func createDefaultMarketConfig() MarketConfig {
 	}
 }
 
-// createMarketConfigForN creates a market configuration for any number of participants
+// createMarketConfigForN creates a realistic market configuration for any number of participants
 func createMarketConfigForN(n int) MarketConfig {
 	if n <= 0 {
 		panic("createMarketConfigForN: N must be positive")
@@ -92,47 +92,75 @@ func createMarketConfigForN(n int) MarketConfig {
 		panic("createMarketConfigForN: N must be divisible by 4")
 	}
 
-	// Create roles map: first half are buyers, second half are sellers
+	// Create realistic mixed roles - not just first half/second half
 	roles := make(map[int]zerocash.OrderType)
-	halfN := n / 2
-
-	for i := 0; i < halfN; i++ {
-		roles[i] = zerocash.BUY
-	}
-	for i := halfN; i < n; i++ {
-		roles[i] = zerocash.SELL
-	}
-
-	// Create initial balances
 	initialCoins := make([]int64, n)
 	initialEnergy := make([]int64, n)
 	orders := make([]zerocash.EnergyOrder, n)
 
+	// Create a balanced market with interspersed buyers and sellers
+	numBuyers := n / 2
+	numSellers := n / 2
+
+	// Create alternating pattern of buyers and sellers for more realistic market
+	buyerCount := 0
+	sellerCount := 0
+
 	for i := 0; i < n; i++ {
-		initialCoins[i] = int64(1000 + i*100)
-		// Use fixed trading volume (same as circuit TRADING_VOLUME constant)
-		initialEnergy[i] = 100
-	}
-
-	// Set order prices according to the specified pattern:
-	// Buyers' bids (already sorted): [N/2, N/2-1, ..., 1] (descending)
-	// Sellers' asks (already sorted): [1, ..., N/2-1, N/2] (ascending)
-
-	// For buyers (indices 0 to N/2-1): bids [N/2, N/2-1, ..., 1]
-	for i := 0; i < halfN; i++ {
-		orders[i] = zerocash.EnergyOrder{
-			Type:     zerocash.BUY,
-			Price:    big.NewInt(int64(halfN - i)), // N/2, N/2-1, ..., 1
-			Quantity: big.NewInt(10),               // Standard quantity of 10 units
+		// Alternate between buyers and sellers, with some variation
+		var role zerocash.OrderType
+		if buyerCount < numBuyers && (sellerCount >= numSellers || i%2 == 0) {
+			role = zerocash.BUY
+			buyerCount++
+		} else if sellerCount < numSellers {
+			role = zerocash.SELL
+			sellerCount++
+		} else {
+			role = zerocash.BUY
+			buyerCount++
 		}
-	}
 
-	// For sellers (indices N/2 to N-1): asks [1, ..., N/2-1, N/2]
-	for i := halfN; i < n; i++ {
-		orders[i] = zerocash.EnergyOrder{
-			Type:     zerocash.SELL,
-			Price:    big.NewInt(int64(i - halfN + 1)), // 1, 2, ..., N/2
-			Quantity: big.NewInt(10),                   // Standard quantity of 10 units
+		roles[i] = role
+
+		// Initial balances: vary based on participant index
+		initialCoins[i] = int64(1000 + i*100)
+		initialEnergy[i] = 100 // Fixed energy for all participants
+
+		// Create realistic market prices
+		// Buyers: willing to pay 40-60 coins per unit (descending by eagerness)
+		// Sellers: asking 20-50 coins per unit (ascending by desperation)
+		if role == zerocash.BUY {
+			// Buyers bid between 40-60, with earlier buyers bidding higher
+			buyerIndex := buyerCount - 1 // 0-based buyer index
+			maxBid := 60
+			minBid := 40
+			bidRange := maxBid - minBid
+			price := int64(maxBid - (buyerIndex*bidRange)/(numBuyers-1))
+			if price < int64(minBid) {
+				price = int64(minBid)
+			}
+
+			orders[i] = zerocash.EnergyOrder{
+				Type:     zerocash.BUY,
+				Price:    big.NewInt(price),
+				Quantity: big.NewInt(10),
+			}
+		} else {
+			// Sellers ask between 20-50, with earlier sellers asking lower
+			sellerIndex := sellerCount - 1 // 0-based seller index
+			minAsk := 20
+			maxAsk := 50
+			askRange := maxAsk - minAsk
+			price := int64(minAsk + (sellerIndex*askRange)/(numSellers-1))
+			if price > int64(maxAsk) {
+				price = int64(maxAsk)
+			}
+
+			orders[i] = zerocash.EnergyOrder{
+				Type:     zerocash.SELL,
+				Price:    big.NewInt(price),
+				Quantity: big.NewInt(10),
+			}
 		}
 	}
 
@@ -553,9 +581,9 @@ func executeExchangePhase(state *ProtocolState) error {
 		state.AuctioneerDHKp.Sk.BigInt(new(big.Int)),
 		state.AuctioneerECDHPriv,
 		participantECDHPubKeys,
-		participantDHPrivKeys,   // REAL DH private keys (not shortcuts!)
-		state.AuctioneerDHKp.Pk, // REAL auctioneer public key
-		state.Config.Roles,      // Participant roles (BUY/SELL)
+		participantDHPrivKeys,
+		state.AuctioneerDHKp.Pk,
+		state.Config.Roles,
 		state.Ledger,
 		&zerocash.Params{},
 		pk,
@@ -613,20 +641,18 @@ func executeExchangePhase(state *ProtocolState) error {
 			}
 		}
 
-		// Create auctioneer commission transaction if commission > 0
-		if auctioneerCommission.Cmp(big.NewInt(0)) > 0 {
-			auctioneerTx := &zerocash.Tx{
-				SnOld:     "auctioneer_input_sn",         // Auctioneer's input serial number
-				CmNew:     "auctioneer_commission_cm",    // Auctioneer's commission commitment
-				OldCoin:   "0",                           // Auctioneer starts with 0
-				OldEnergy: "0",                           // Auctioneer starts with 0 energy
-				NewCoin:   auctioneerCommission.String(), // Commission collected
-				NewEnergy: "0",                           // No energy for auctioneer
-				Proof:     exchangeProof,                 // Same proof
-			}
-			outputTxs = append(outputTxs, auctioneerTx)
-			fmt.Printf("💰 Created auctioneer commission transaction: %v coins\n", auctioneerCommission)
+		// Create auctioneer commission transaction
+		auctioneerTx := &zerocash.Tx{
+			SnOld:     "auctioneer_input_sn",         // Auctioneer's input serial number
+			CmNew:     "auctioneer_commission_cm",    // Auctioneer's commission commitment
+			OldCoin:   "0",                           // Auctioneer starts with 0
+			OldEnergy: "0",                           // Auctioneer starts with 0 energy
+			NewCoin:   auctioneerCommission.String(), // Commission collected (could be 0)
+			NewEnergy: "0",                           // No energy for auctioneer
+			Proof:     exchangeProof,                 // Same proof
 		}
+		outputTxs = append(outputTxs, auctioneerTx)
+		fmt.Printf("💰 Created auctioneer commission transaction: %v coins\n", auctioneerCommission)
 	}
 
 	// Transition ledger to exchange phase before submitting results
