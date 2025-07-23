@@ -1,10 +1,14 @@
 package exchange
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
 	"implementation/internal/zerocash"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test scenarios for RunAuctionLogicWithCommission
@@ -450,4 +454,287 @@ func TestEdgeCases(t *testing.T) {
 			t.Errorf("Function should not panic with nil prices")
 		}
 	})
+}
+
+// Test with plotting - comprehensive auction scenarios with visualization
+func TestAuctionScenariosWithPlots(t *testing.T) {
+	scenarios := []struct {
+		name     string
+		inputs   []DecryptedRegistration
+		roles    map[int]zerocash.OrderType
+		plotName string
+	}{
+		{
+			name: "Perfect Intersection - Even Sum",
+			inputs: []DecryptedRegistration{
+				{Price: big.NewInt(60), Quantity: big.NewInt(15), Coins: big.NewInt(1000), Energy: big.NewInt(150)}, // Buyer
+				{Price: big.NewInt(40), Quantity: big.NewInt(15), Coins: big.NewInt(600), Energy: big.NewInt(150)},  // Seller
+			},
+			roles: map[int]zerocash.OrderType{
+				0: zerocash.BUY,
+				1: zerocash.SELL,
+			},
+			plotName: "commission_test_perfect_intersection.svg",
+		},
+		{
+			name: "Odd Sum with Commission",
+			inputs: []DecryptedRegistration{
+				{Price: big.NewInt(99), Quantity: big.NewInt(20), Coins: big.NewInt(2000), Energy: big.NewInt(200)}, // Buyer - high price
+				{Price: big.NewInt(20), Quantity: big.NewInt(20), Coins: big.NewInt(400), Energy: big.NewInt(200)},  // Seller - low price
+			},
+			roles: map[int]zerocash.OrderType{
+				0: zerocash.BUY,
+				1: zerocash.SELL,
+			},
+			plotName: "commission_test_large_commission.svg",
+		},
+		{
+			name: "Multi-Participant Market",
+			inputs: []DecryptedRegistration{
+				// Buyers (descending prices)
+				{Price: big.NewInt(95), Quantity: big.NewInt(10), Coins: big.NewInt(1000), Energy: big.NewInt(100)}, // Buyer 0
+				{Price: big.NewInt(85), Quantity: big.NewInt(15), Coins: big.NewInt(1300), Energy: big.NewInt(130)}, // Buyer 1
+				{Price: big.NewInt(75), Quantity: big.NewInt(20), Coins: big.NewInt(1500), Energy: big.NewInt(150)}, // Buyer 2
+				{Price: big.NewInt(65), Quantity: big.NewInt(25), Coins: big.NewInt(1600), Energy: big.NewInt(160)}, // Buyer 3
+				{Price: big.NewInt(55), Quantity: big.NewInt(30), Coins: big.NewInt(1700), Energy: big.NewInt(170)}, // Buyer 4
+				// Sellers (ascending prices)
+				{Price: big.NewInt(25), Quantity: big.NewInt(35), Coins: big.NewInt(500), Energy: big.NewInt(350)}, // Seller 0
+				{Price: big.NewInt(35), Quantity: big.NewInt(30), Coins: big.NewInt(400), Energy: big.NewInt(300)}, // Seller 1
+				{Price: big.NewInt(45), Quantity: big.NewInt(25), Coins: big.NewInt(300), Energy: big.NewInt(250)}, // Seller 2
+				{Price: big.NewInt(55), Quantity: big.NewInt(20), Coins: big.NewInt(200), Energy: big.NewInt(200)}, // Seller 3
+				{Price: big.NewInt(65), Quantity: big.NewInt(15), Coins: big.NewInt(150), Energy: big.NewInt(150)}, // Seller 4
+			},
+			roles: map[int]zerocash.OrderType{
+				0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY, 4: zerocash.BUY,
+				5: zerocash.SELL, 6: zerocash.SELL, 7: zerocash.SELL, 8: zerocash.SELL, 9: zerocash.SELL,
+			},
+			plotName: "commission_test_multi_participant.svg",
+		},
+		{
+			name: "No Intersection Gap",
+			inputs: []DecryptedRegistration{
+				{Price: big.NewInt(30), Quantity: big.NewInt(10), Coins: big.NewInt(300), Energy: big.NewInt(100)}, // Low buyer
+				{Price: big.NewInt(25), Quantity: big.NewInt(15), Coins: big.NewInt(400), Energy: big.NewInt(120)}, // Lower buyer
+				{Price: big.NewInt(70), Quantity: big.NewInt(10), Coins: big.NewInt(200), Energy: big.NewInt(100)}, // High seller
+				{Price: big.NewInt(80), Quantity: big.NewInt(15), Coins: big.NewInt(150), Energy: big.NewInt(150)}, // Higher seller
+			},
+			roles: map[int]zerocash.OrderType{
+				0: zerocash.BUY, 1: zerocash.BUY,
+				2: zerocash.SELL, 3: zerocash.SELL,
+			},
+			plotName: "commission_test_no_intersection.svg",
+		},
+		{
+			name: "High Volume Market",
+			inputs: []DecryptedRegistration{
+				{Price: big.NewInt(100), Quantity: big.NewInt(50), Coins: big.NewInt(5000), Energy: big.NewInt(500)}, // High buyer
+				{Price: big.NewInt(90), Quantity: big.NewInt(45), Coins: big.NewInt(4000), Energy: big.NewInt(450)},  // Medium-high buyer
+				{Price: big.NewInt(80), Quantity: big.NewInt(40), Coins: big.NewInt(3200), Energy: big.NewInt(400)},  // Medium buyer
+				{Price: big.NewInt(70), Quantity: big.NewInt(35), Coins: big.NewInt(2500), Energy: big.NewInt(350)},  // Lower buyer
+				{Price: big.NewInt(20), Quantity: big.NewInt(60), Coins: big.NewInt(800), Energy: big.NewInt(600)},   // Low seller
+				{Price: big.NewInt(30), Quantity: big.NewInt(55), Coins: big.NewInt(700), Energy: big.NewInt(550)},   // Low-medium seller
+				{Price: big.NewInt(40), Quantity: big.NewInt(50), Coins: big.NewInt(600), Energy: big.NewInt(500)},   // Medium seller
+				{Price: big.NewInt(50), Quantity: big.NewInt(45), Coins: big.NewInt(500), Energy: big.NewInt(450)},   // Medium-high seller
+			},
+			roles: map[int]zerocash.OrderType{
+				0: zerocash.BUY, 1: zerocash.BUY, 2: zerocash.BUY, 3: zerocash.BUY,
+				4: zerocash.SELL, 5: zerocash.SELL, 6: zerocash.SELL, 7: zerocash.SELL,
+			},
+			plotName: "commission_test_high_volume.svg",
+		},
+	}
+
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			fmt.Printf("\n📊 Testing scenario: %s\n", scenario.name)
+
+			// Run auction logic
+			result := RunAuctionLogicWithCommission(scenario.inputs, scenario.roles)
+
+			// Create plot configuration
+			config := DefaultPlotConfig()
+			config.OutputPath = scenario.plotName
+			config.Title = fmt.Sprintf("%s | Clearing: %v | Commission: %v | Traded: %d",
+				scenario.name, result.ClearingPrice, result.AuctioneerCommission, result.TotalEnergyTraded)
+
+			// Generate plot
+			err := CreateSupplyDemandPlot(scenario.inputs, scenario.roles, result, config)
+			if err != nil {
+				t.Logf("⚠️  Plot generation failed: %v", err)
+			} else {
+				fmt.Printf("   ✅ Plot saved: %s\n", scenario.plotName)
+			}
+
+			// Print results
+			fmt.Printf("   📈 Results: Clearing=%v, Commission=%v, Traded=%d units\n",
+				result.ClearingPrice, result.AuctioneerCommission, result.TotalEnergyTraded)
+			fmt.Printf("   🎯 Qualified: %d buyers, %d sellers\n",
+				result.QualifiedBuyers, result.QualifiedSellers)
+			fmt.Printf("   💰 Auctioneer note: %v coins, %d outputs total\n",
+				result.AuctioneerNote.Coins, result.GetTotalOutputCount())
+
+			// Verify Euclidean division for trading scenarios
+			if result.TotalEnergyTraded > 0 {
+				// Check conservation
+				totalCommission := result.AuctioneerCommission.Int64()
+				commissionPerUnit := totalCommission / result.TotalEnergyTraded
+
+				fmt.Printf("   🧮 Commission: %d total (%d per unit × %d units)\n",
+					totalCommission, commissionPerUnit, result.TotalEnergyTraded)
+
+				// Basic sanity checks
+				if result.ClearingPrice.Cmp(big.NewInt(0)) <= 0 {
+					t.Errorf("Invalid clearing price: %v", result.ClearingPrice)
+				}
+				if result.AuctioneerCommission.Cmp(big.NewInt(0)) < 0 {
+					t.Errorf("Negative commission: %v", result.AuctioneerCommission)
+				}
+
+				// Verify auctioneer note exists and matches commission
+				if result.AuctioneerNote == nil {
+					t.Errorf("Auctioneer note is missing")
+				} else if result.AuctioneerNote.Coins.Cmp(result.AuctioneerCommission) != 0 {
+					t.Errorf("Auctioneer note commission mismatch: note=%v, commission=%v",
+						result.AuctioneerNote.Coins, result.AuctioneerCommission)
+				}
+
+				// Test conservation including auctioneer note
+				allOutputs := result.GetAllOutputsIncludingAuctioneer()
+				if len(allOutputs) != len(scenario.inputs)+1 {
+					t.Errorf("Expected %d total outputs (N+1), got %d", len(scenario.inputs)+1, len(allOutputs))
+				}
+
+				// Conservation check: total input coins = total output coins
+				totalInputCoins := big.NewInt(0)
+				totalInputEnergy := big.NewInt(0)
+				for _, input := range scenario.inputs {
+					totalInputCoins.Add(totalInputCoins, input.Coins)
+					totalInputEnergy.Add(totalInputEnergy, input.Energy)
+				}
+
+				totalOutputCoins := big.NewInt(0)
+				totalOutputEnergy := big.NewInt(0)
+				for _, output := range allOutputs {
+					totalOutputCoins.Add(totalOutputCoins, output.Coins)
+					totalOutputEnergy.Add(totalOutputEnergy, output.Energy)
+				}
+
+				if totalInputCoins.Cmp(totalOutputCoins) != 0 {
+					t.Errorf("Coin conservation violated: input=%v, output=%v", totalInputCoins, totalOutputCoins)
+				}
+				if totalInputEnergy.Cmp(totalOutputEnergy) != 0 {
+					t.Errorf("Energy conservation violated: input=%v, output=%v", totalInputEnergy, totalOutputEnergy)
+				}
+
+				fmt.Printf("   ✅ Conservation verified: coins %v, energy %v\n", totalInputCoins, totalInputEnergy)
+			} else {
+				fmt.Printf("   ℹ️  No trading occurred (no intersection)\n")
+			}
+		})
+	}
+}
+
+// TestAuctioneerNoteRigor tests that the auctioneer note follows the same cryptographic rigor as participant notes
+func TestAuctioneerNoteRigor(t *testing.T) {
+	// Create a simple auction scenario
+	inputs := []DecryptedRegistration{
+		{PkOut: big.NewInt(100), SkIn: big.NewInt(200), Price: big.NewInt(50), Quantity: big.NewInt(10), Coins: big.NewInt(1000), Energy: big.NewInt(100)},
+		{PkOut: big.NewInt(101), SkIn: big.NewInt(201), Price: big.NewInt(30), Quantity: big.NewInt(10), Coins: big.NewInt(800), Energy: big.NewInt(150)},
+	}
+	roles := map[int]zerocash.OrderType{0: zerocash.BUY, 1: zerocash.SELL}
+
+	// Generate proper auctioneer secret key
+	auctioneerSk := big.NewInt(12345)
+
+	// Run auction with commission
+	result := RunAuctionLogicWithCommissionAndAuctioneer(inputs, roles, auctioneerSk)
+
+	// Verify auctioneer note exists
+	require.NotNil(t, result.AuctioneerNote, "Auctioneer note must exist")
+	require.NotNil(t, result.AuctioneerNote.NoteData, "Auctioneer note must contain actual zerocash.Note data")
+
+	auctioneerNote := result.AuctioneerNote.NoteData
+
+	// Test 1: Verify note has proper structure
+	t.Run("Note Structure", func(t *testing.T) {
+		assert.NotNil(t, auctioneerNote.Value, "Note must have Value (Gamma)")
+		assert.NotNil(t, auctioneerNote.Value.Coins, "Note must have Coins")
+		assert.NotNil(t, auctioneerNote.Value.Energy, "Note must have Energy")
+		assert.NotNil(t, auctioneerNote.PkOwner, "Note must have PkOwner")
+		assert.NotNil(t, auctioneerNote.Rho, "Note must have Rho")
+		assert.NotNil(t, auctioneerNote.Rand, "Note must have Rand")
+		assert.NotNil(t, auctioneerNote.Cm, "Note must have Commitment")
+	})
+
+	// Test 2: Verify cryptographic randomness
+	t.Run("Cryptographic Randomness", func(t *testing.T) {
+		assert.Equal(t, 32, len(auctioneerNote.Rho), "Rho must be 32 bytes")
+		assert.Equal(t, 32, len(auctioneerNote.Rand), "Rand must be 32 bytes")
+
+		// Verify randomness is not all zeros (should be cryptographically random)
+		allZerosRho := make([]byte, 32)
+		allZerosRand := make([]byte, 32)
+		assert.NotEqual(t, allZerosRho, auctioneerNote.Rho, "Rho must not be all zeros")
+		assert.NotEqual(t, allZerosRand, auctioneerNote.Rand, "Rand must not be all zeros")
+	})
+
+	// Test 3: Verify public key derivation (pk = H(sk))
+	t.Run("Public Key Derivation", func(t *testing.T) {
+		// Recompute public key from secret key
+		expectedPk := zerocash.MimcHashPublic(auctioneerSk.Bytes())
+		actualPk := new(big.Int).SetBytes(auctioneerNote.PkOwner)
+		assert.Equal(t, expectedPk, actualPk, "Public key must be H(secret key)")
+	})
+
+	// Test 4: Verify commitment computation (cm = Com(Γ || pk || ρ, r))
+	t.Run("Commitment Verification", func(t *testing.T) {
+		// Recompute commitment using zerocash.Commitment
+		expectedCm := zerocash.Commitment(
+			auctioneerNote.Value.Coins,                 // Γ.coins
+			auctioneerNote.Value.Energy,                // Γ.energy
+			auctioneerNote.PkOwner,                     // pk
+			new(big.Int).SetBytes(auctioneerNote.Rho),  // ρ
+			new(big.Int).SetBytes(auctioneerNote.Rand), // r
+		)
+		assert.Equal(t, expectedCm, auctioneerNote.Cm, "Commitment must be Com(Γ || pk || ρ, r)")
+	})
+
+	// Test 5: Verify values are consistent
+	t.Run("Value Consistency", func(t *testing.T) {
+		// Commission should match between DecryptedRegistration and Note
+		assert.Equal(t, result.AuctioneerNote.Coins, auctioneerNote.Value.Coins, "Commission coins must match")
+		assert.Equal(t, big.NewInt(0), auctioneerNote.Value.Energy, "Auctioneer energy must be 0")
+
+		// Verify commission is correct for this scenario
+		if result.AuctioneerCommission.Cmp(big.NewInt(0)) > 0 {
+			totalCommission := new(big.Int).Mul(result.AuctioneerCommission, big.NewInt(result.TotalEnergyTraded))
+			assert.Equal(t, totalCommission, auctioneerNote.Value.Coins, "Total commission must match")
+		}
+	})
+
+	// Test 6: Compare with participant note structure
+	t.Run("Rigor Comparison", func(t *testing.T) {
+		// Create a participant note for comparison
+		participantSk := big.NewInt(999)
+		participantNote := zerocash.NewNote(big.NewInt(100), big.NewInt(50), participantSk.Bytes())
+
+		// Both notes should have the same structural rigor
+		assert.Equal(t, len(participantNote.Rho), len(auctioneerNote.Rho), "Same Rho length")
+		assert.Equal(t, len(participantNote.Rand), len(auctioneerNote.Rand), "Same Rand length")
+		assert.Equal(t, len(participantNote.PkOwner), len(auctioneerNote.PkOwner), "Same PkOwner length")
+		assert.Equal(t, len(participantNote.Cm), len(auctioneerNote.Cm), "Same Commitment length")
+
+		// Both should use the same cryptographic primitives
+		assert.IsType(t, participantNote.Value, auctioneerNote.Value, "Same Value type")
+		assert.IsType(t, participantNote.PkOwner, auctioneerNote.PkOwner, "Same PkOwner type")
+		assert.IsType(t, participantNote.Cm, auctioneerNote.Cm, "Same Commitment type")
+	})
+
+	t.Logf("✅ Auctioneer note cryptographic rigor verified:")
+	t.Logf("   📝 Note structure: COMPLETE")
+	t.Logf("   🔐 Cryptographic randomness: SECURE")
+	t.Logf("   🔑 Public key derivation: CORRECT")
+	t.Logf("   📊 Commitment computation: VERIFIED")
+	t.Logf("   💰 Commission: %v coins", auctioneerNote.Value.Coins)
+	t.Logf("   ⚖️  Same rigor as participant notes: CONFIRMED")
 }

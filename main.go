@@ -576,7 +576,7 @@ func executeExchangePhase(state *ProtocolState) error {
 	pk := dynamicKeys.ProvingKey
 	ccs := dynamicKeys.ConstraintSystem
 
-	exchangeTx, _, exchangeProof, err := exchange.ExchangePhaseWithNotes(
+	exchangeTx, auctionInfo, exchangeProof, err := exchange.ExchangePhaseWithNotes(
 		exchangePayloads,
 		state.AuctioneerDHKp.Sk.BigInt(new(big.Int)),
 		state.AuctioneerECDHPriv,
@@ -602,27 +602,14 @@ func executeExchangePhase(state *ProtocolState) error {
 	var auctioneerCommission *big.Int = big.NewInt(0)
 
 	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
-		// Get auction execution result to access commission info
-		auctionExecution := exchange.RunAuctionLogicWithCommission(
-			func() []exchange.DecryptedRegistration {
-				// Need to reconstruct the auction inputs from exchange result
-				inputs := make([]exchange.DecryptedRegistration, len(exchangeResult.Inputs))
-				for i, input := range exchangeResult.Inputs {
-					inputs[i] = exchange.DecryptedRegistration{
-						PkOut:    input.PkOut,
-						SkIn:     input.SkIn,
-						Price:    input.Price,
-						Quantity: input.Quantity,
-						Coins:    input.Coins,
-						Energy:   input.Energy,
-						NoteData: input.NoteData,
-					}
-				}
-				return inputs
-			}(),
-			state.Config.Roles,
-		)
-		auctioneerCommission = auctionExecution.AuctioneerCommission
+		// Extract auctioneer commission from the composite result
+		if compositeResult, ok := auctionInfo.(struct {
+			AuctionResult    *exchange.AuctionResult
+			AuctionExecution *exchange.AuctionExecutionResult
+		}); ok {
+			// Get commission directly from auction execution result
+			auctioneerCommission = compositeResult.AuctionExecution.AuctioneerCommission
+		}
 
 		// Create participant output transactions
 		for i, output := range exchangeResult.Outputs {
@@ -661,8 +648,8 @@ func executeExchangePhase(state *ProtocolState) error {
 	}
 
 	// Submit exchange results to ledger with individual output transactions
-	auctionInfo := []byte(fmt.Sprintf(`{"auction_type":"sealed_bid_double_auction","participants":%d}`, state.Config.NumParticipants))
-	err = state.Ledger.SubmitExchange(outputTxs, state.ExchangeProof, auctionInfo)
+	auctionInfoBytes := []byte(fmt.Sprintf(`{"auction_type":"sealed_bid_double_auction","participants":%d}`, state.Config.NumParticipants))
+	err = state.Ledger.SubmitExchange(outputTxs, state.ExchangeProof, auctionInfoBytes)
 	if err != nil {
 		return fmt.Errorf("failed to submit exchange results: %w", err)
 	}
