@@ -267,14 +267,35 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
 }
 
+// AuctionResult contains the results of the auction execution
+type AuctionExecutionResult struct {
+	Outputs              []DecryptedRegistration
+	ClearingPrice        *big.Int
+	AuctioneerCommission *big.Int
+	TotalEnergyTraded    int64
+	TotalCoinsTraded     int64
+	QualifiedBuyers      int
+	QualifiedSellers     int
+}
+
 // RunAuctionLogic implements a simple double auction mechanism
-// 1. Sort buyers (descending) and sellers (ascending) based on actual roles
-// 2. Find intersection point where buyer_bid >= seller_ask
-// 3. Calculate clearing price as average of intersecting bid/ask
-// 4. Execute trades for all qualifying participants at clearing price
-func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) []DecryptedRegistration {
+//  1. Sort buyers (descending) and sellers (ascending) based on actual roles
+//  2. Find intersection point where buyer_bid >= seller_ask
+//  3. Calculate clearing price using Euclidean division: (buy_price + sell_price) = 2*clearing_price + remainder
+//     The remainder becomes the auctioneer's commission (ZKP circuit compatible)
+//  4. Execute trades for all qualifying participants at clearing price
+//  5. Collect auctioneer commission and ensure conservation
+func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) *AuctionExecutionResult {
 	if len(inputs) == 0 {
-		return inputs
+		return &AuctionExecutionResult{
+			Outputs:              inputs,
+			ClearingPrice:        big.NewInt(0),
+			AuctioneerCommission: big.NewInt(0),
+			TotalEnergyTraded:    0,
+			TotalCoinsTraded:     0,
+			QualifiedBuyers:      0,
+			QualifiedSellers:     0,
+		}
 	}
 
 	numParticipants := len(inputs)
@@ -335,9 +356,9 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 	})
 
 	// Helper function to find intersection point using proper step-wise curve logic
-	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, bool) {
+	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, *big.Int, bool) {
 		if len(buyers) == 0 || len(sellers) == 0 {
-			return nil, false
+			return nil, nil, false
 		}
 
 		// Build cumulative step-wise curves
@@ -405,18 +426,25 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 		}
 
 		if lastValidBuyerPrice != nil && lastValidSellerPrice != nil {
-			// Clearing price = average of last intersecting step prices
-			// Note: Using integer division which rounds DOWN (truncates fractional part)
+			// Clearing price using Euclidean division for ZKP circuit compatibility
+			// (buyer_price + seller_price) = 2 * clearing_price + remainder
+			// The remainder becomes the auctioneer's commission
 			sum := new(big.Int).Add(lastValidBuyerPrice, lastValidSellerPrice)
 			clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
-			return clearingPrice, true
+			remainder := new(big.Int).Mod(sum, big.NewInt(2))
+
+			fmt.Printf("Clearing price calculation: (%v + %v) = 2 * %v + %v\n",
+				lastValidBuyerPrice, lastValidSellerPrice, clearingPrice, remainder)
+			fmt.Printf("Auctioneer commission from price rounding: %v\n", remainder)
+
+			return clearingPrice, remainder, true
 		}
 
-		return nil, false
+		return nil, nil, false
 	}
 
 	// Helper function to execute trades at clearing price with proper market clearing
-	executeTradesAtClearingPrice := func(buyers, sellers []IndexedParticipant, clearingPrice *big.Int) {
+	executeTradesAtClearingPrice := func(buyers, sellers []IndexedParticipant, clearingPrice *big.Int, auctioneerCommission *big.Int) (int64, int64, int, int) {
 		// Find qualifying buyers (bid >= clearing price)
 		var qualifiedBuyers []IndexedParticipant
 		for _, buyer := range buyers {
@@ -464,7 +492,7 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 
 		if tradeableQuantity <= 0 {
 			fmt.Printf("No trading occurs - zero tradeable quantity\n")
-			return
+			return 0, 0, len(qualifiedBuyers), len(qualifiedSellers)
 		}
 
 		// Priority-based allocation using price-time priority
@@ -550,15 +578,19 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 			idx := buyer.Index
 			tradingCost := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
 
-			// Buyer: lose coins, gain energy
-			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, tradingCost)
+			// Calculate commission for this trade (commission per unit * quantity)
+			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
+			totalCostWithCommission := new(big.Int).Add(tradingCost, tradeCommission)
+
+			// Buyer: lose coins (including commission), gain energy
+			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, totalCostWithCommission)
 			outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, big.NewInt(allocatedQty))
 
 			totalEnergyTraded += allocatedQty
-			totalCoinsTraded += tradingCost.Int64()
+			totalCoinsTraded += totalCostWithCommission.Int64()
 
-			fmt.Printf("Buyer %d: paid %v coins for %d energy at price %v\n",
-				idx, tradingCost, allocatedQty, clearingPrice)
+			fmt.Printf("Buyer %d: paid %v coins (%v trade + %v commission) for %d energy at price %v\n",
+				idx, totalCostWithCommission, tradingCost, tradeCommission, allocatedQty, clearingPrice)
 		}
 
 		// Execute seller trades
@@ -571,12 +603,16 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 			idx := seller.Index
 			tradingRevenue := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
 
-			// Seller: gain coins, lose energy
-			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, tradingRevenue)
+			// Calculate commission for this trade (commission per unit * quantity)
+			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
+			netRevenue := new(big.Int).Sub(tradingRevenue, tradeCommission)
+
+			// Seller: gain coins (minus commission), lose energy
+			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, netRevenue)
 			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, big.NewInt(allocatedQty))
 
-			fmt.Printf("Seller %d: sold %d energy for %v coins at price %v\n",
-				idx, allocatedQty, tradingRevenue, clearingPrice)
+			fmt.Printf("Seller %d: sold %d energy for %v coins (%v revenue - %v commission) at price %v\n",
+				idx, allocatedQty, netRevenue, tradingRevenue, tradeCommission, clearingPrice)
 		}
 
 		// Verification: ensure conservation laws
@@ -584,6 +620,7 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 		fmt.Printf("   Total energy traded: %d units\n", totalEnergyTraded)
 		fmt.Printf("   Total coins exchanged: %d coins\n", totalCoinsTraded)
 		fmt.Printf("   Average execution price: %v coins/unit\n", clearingPrice)
+		fmt.Printf("   Auctioneer commission: %v coins (from price rounding)\n", auctioneerCommission)
 
 		// Sanity check: all allocations should sum to tradeable quantity
 		var totalBuyerAllocation, totalSellerAllocation int64
@@ -600,22 +637,49 @@ func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.Orde
 		} else {
 			fmt.Printf("✅ Conservation verified: %d units traded on both sides\n", tradeableQuantity)
 		}
+
+		return totalEnergyTraded, totalCoinsTraded, len(qualifiedBuyers), len(qualifiedSellers)
 	}
 
 	// Find intersection point
-	clearingPrice, tradingOccurs := findClearingPrice(buyers, sellers)
+	clearingPrice, auctioneerCommission, tradingOccurs := findClearingPrice(buyers, sellers)
 
 	if !tradingOccurs {
 		fmt.Printf("Auction debug: No intersection found - no trading occurs\n")
-		return outputs
+		return &AuctionExecutionResult{
+			Outputs:              outputs,
+			ClearingPrice:        big.NewInt(0),
+			AuctioneerCommission: big.NewInt(0),
+			TotalEnergyTraded:    0,
+			TotalCoinsTraded:     0,
+			QualifiedBuyers:      0,
+			QualifiedSellers:     0,
+		}
 	}
 
-	fmt.Printf("Auction debug: Clearing price found = %v\n", clearingPrice)
+	fmt.Printf("Auction debug: Clearing price found = %v, Auctioneer commission = %v\n", clearingPrice, auctioneerCommission)
 
 	// Execute trades for qualifying participants
-	executeTradesAtClearingPrice(buyers, sellers, clearingPrice)
+	totalEnergyTraded, totalCoinsTraded, qualifiedBuyers, qualifiedSellers := executeTradesAtClearingPrice(buyers, sellers, clearingPrice, auctioneerCommission)
 
-	return outputs
+	// Calculate total commission collected (commission per unit * total units traded)
+	totalCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(totalEnergyTraded))
+
+	return &AuctionExecutionResult{
+		Outputs:              outputs,
+		ClearingPrice:        clearingPrice,
+		AuctioneerCommission: totalCommission,
+		TotalEnergyTraded:    totalEnergyTraded,
+		TotalCoinsTraded:     totalCoinsTraded,
+		QualifiedBuyers:      qualifiedBuyers,
+		QualifiedSellers:     qualifiedSellers,
+	}
+}
+
+// RunAuctionLogic is a backward-compatible wrapper that returns only the outputs
+func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) []DecryptedRegistration {
+	result := RunAuctionLogicWithCommission(inputs, roles)
+	return result.Outputs
 }
 
 /*
@@ -1185,7 +1249,8 @@ func ExchangePhaseWithNotes(
 	fmt.Printf("\n")
 
 	// 5. Run auction logic with sorted data - sophisticated sealed-bid double auction mechanism
-	outputs := RunAuctionLogic(sortedInputs, roles)
+	auctionExecution := RunAuctionLogicWithCommission(sortedInputs, roles)
+	outputs := auctionExecution.Outputs
 
 	// 6. Build witness using the dynamic circuit approach with sorted data
 	// Convert auctioneerDHPk from *bls12377.G1Affine to *sw_bls12377.G1Affine
@@ -1236,7 +1301,7 @@ func ExchangePhaseWithNotes(
 		ProofHash:   proofHash,
 	}
 
-	// Create exchange transaction output
+	// Create exchange transaction output including auctioneer commission
 	exchangeTx := &ExchangeTransaction{
 		Participants: len(inputs),
 		Inputs:       inputs,
@@ -1245,6 +1310,14 @@ func ExchangePhaseWithNotes(
 		TotalEnergy:  totalEnergy,
 		Timestamp:    timestamp,
 		ProofData:    proof,
+	}
+
+	// Add auctioneer commission info to auction result
+	auctionResult.TotalCoins = new(big.Int).Add(auctionResult.TotalCoins, auctionExecution.AuctioneerCommission)
+
+	// Log commission collection
+	if auctionExecution.AuctioneerCommission.Cmp(big.NewInt(0)) > 0 {
+		fmt.Printf("💰 Auctioneer commission collected: %v coins\n", auctionExecution.AuctioneerCommission)
 	}
 
 	// 8. Return structured results

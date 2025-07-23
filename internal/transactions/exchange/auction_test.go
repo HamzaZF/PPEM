@@ -509,12 +509,12 @@ func TestAuctionScenarios(t *testing.T) {
 			// Create test inputs
 			inputs, roles := createTestInputs(scenario.Buyers, scenario.Sellers)
 
-			// Run auction
-			outputs := RunAuctionLogic(inputs, roles)
+			// Run the auction
+			outputs, _ := RunAuctionLogic(inputs, roles)
+			clearingPrice := extractClearingPrice(scenario.Buyers, scenario.Sellers)
 
 			// Determine if trading occurred by checking if any balances changed
 			tradingOccurred := false
-			clearingPrice := extractClearingPrice(scenario.Buyers, scenario.Sellers)
 
 			for i, output := range outputs {
 				if output.Coins.Cmp(inputs[i].Coins) != 0 || output.Energy.Cmp(inputs[i].Energy) != 0 {
@@ -683,7 +683,7 @@ func TestAuctionLogicEdgeCases(t *testing.T) {
 		inputs := []DecryptedRegistration{}
 		roles := map[int]zerocash.OrderType{}
 
-		outputs := RunAuctionLogic(inputs, roles)
+		outputs, _ := RunAuctionLogic(inputs, roles)
 
 		if len(outputs) != 0 {
 			t.Errorf("Expected empty output for empty input, got %d outputs", len(outputs))
@@ -700,7 +700,7 @@ func TestAuctionLogicEdgeCases(t *testing.T) {
 			1: zerocash.BUY,
 		}
 
-		outputs := RunAuctionLogic(inputs, roles)
+		outputs, _ := RunAuctionLogic(inputs, roles)
 
 		// Should be no trading since no sellers
 		for i, output := range outputs {
@@ -722,7 +722,7 @@ func TestAuctionLogicEdgeCases(t *testing.T) {
 			1: zerocash.SELL,
 		}
 
-		outputs := RunAuctionLogic(inputs, roles)
+		outputs, _ := RunAuctionLogic(inputs, roles)
 
 		// Should be no trading since no buyers
 		for i, output := range outputs {
@@ -745,7 +745,7 @@ func TestAuctionLogicEdgeCases(t *testing.T) {
 		}
 
 		// Should not panic and should handle nil gracefully
-		outputs := RunAuctionLogic(inputs, roles)
+		outputs, _ := RunAuctionLogic(inputs, roles)
 
 		if len(outputs) != len(inputs) {
 			t.Errorf("Expected %d outputs, got %d", len(inputs), len(outputs))

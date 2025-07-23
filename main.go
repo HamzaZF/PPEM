@@ -571,7 +571,32 @@ func executeExchangePhase(state *ProtocolState) error {
 	fmt.Println("  - Creating output transactions...")
 
 	outputTxs := make([]*zerocash.Tx, 0)
+	var auctioneerCommission *big.Int = big.NewInt(0)
+
 	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
+		// Get auction execution result to access commission info
+		auctionExecution := exchange.RunAuctionLogicWithCommission(
+			func() []exchange.DecryptedRegistration {
+				// Need to reconstruct the auction inputs from exchange result
+				inputs := make([]exchange.DecryptedRegistration, len(exchangeResult.Inputs))
+				for i, input := range exchangeResult.Inputs {
+					inputs[i] = exchange.DecryptedRegistration{
+						PkOut:    input.PkOut,
+						SkIn:     input.SkIn,
+						Price:    input.Price,
+						Quantity: input.Quantity,
+						Coins:    input.Coins,
+						Energy:   input.Energy,
+						NoteData: input.NoteData,
+					}
+				}
+				return inputs
+			}(),
+			state.Config.Roles,
+		)
+		auctioneerCommission = auctionExecution.AuctioneerCommission
+
+		// Create participant output transactions
 		for i, output := range exchangeResult.Outputs {
 			if i < len(state.RegistrationTxs) && output.Coins != nil && output.Energy != nil {
 				// Create output transaction using input serial number and new commitment
@@ -586,6 +611,21 @@ func executeExchangePhase(state *ProtocolState) error {
 				}
 				outputTxs = append(outputTxs, outputTx)
 			}
+		}
+
+		// Create auctioneer commission transaction if commission > 0
+		if auctioneerCommission.Cmp(big.NewInt(0)) > 0 {
+			auctioneerTx := &zerocash.Tx{
+				SnOld:     "auctioneer_input_sn",         // Auctioneer's input serial number
+				CmNew:     "auctioneer_commission_cm",    // Auctioneer's commission commitment
+				OldCoin:   "0",                           // Auctioneer starts with 0
+				OldEnergy: "0",                           // Auctioneer starts with 0 energy
+				NewCoin:   auctioneerCommission.String(), // Commission collected
+				NewEnergy: "0",                           // No energy for auctioneer
+				Proof:     exchangeProof,                 // Same proof
+			}
+			outputTxs = append(outputTxs, auctioneerTx)
+			fmt.Printf("💰 Created auctioneer commission transaction: %v coins\n", auctioneerCommission)
 		}
 	}
 
