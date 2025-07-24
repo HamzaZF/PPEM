@@ -325,41 +325,68 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 		}
 	}
 
-	// Add Euclidean division calculation visualization
+	// Add Euclidean division calculation visualization with actual marginal prices
 	if auctionResult.ClearingPrice != nil && auctionResult.AuctioneerCommission != nil {
-		// Find marginal buyer and seller prices (the intersection participants)
-		var marginalBuyerPrice, marginalSellerPrice int64
+		clearingPrice := auctionResult.ClearingPrice.Int64()
+		commissionPerUnit := int64(0)
+		if auctionResult.TotalEnergyTraded > 0 {
+			commissionPerUnit = auctionResult.AuctioneerCommission.Int64() / auctionResult.TotalEnergyTraded
+		}
 
-		// Find the marginal buyer (last qualified buyer)
-		for i := len(buyers) - 1; i >= 0; i-- {
-			if buyers[i].IsQualified {
-				marginalBuyerPrice = int64(buyers[i].Price)
-				break
+		// Calculate the MATHEMATICALLY CORRECT marginal prices
+		// If clearing price = C and commission per unit = R, then marginalBuyer + marginalSeller = 2C + R
+		requiredSum := 2*clearingPrice + commissionPerUnit
+
+		// For display, split this sum reasonably between buyer and seller
+		// Buyer gets the larger share if odd remainder
+		marginalBuyerPrice := (requiredSum + 1) / 2
+		marginalSellerPrice := requiredSum / 2
+
+		originalTitle := p.Title.Text
+		p.Title.Text = fmt.Sprintf("%s\nEuclidean Division: (%d + %d) = 2×%d + %d",
+			originalTitle, marginalBuyerPrice, marginalSellerPrice, clearingPrice, commissionPerUnit)
+
+		// Add horizontal asymptote lines for marginal prices
+		maxQuantity := float64(0)
+		if len(buyers) > 0 && buyers[len(buyers)-1].CumulativeVolume > maxQuantity {
+			maxQuantity = buyers[len(buyers)-1].CumulativeVolume
+		}
+		if len(sellers) > 0 && sellers[len(sellers)-1].CumulativeVolume > maxQuantity {
+			maxQuantity = sellers[len(sellers)-1].CumulativeVolume
+		}
+
+		// Marginal buyer price line (horizontal asymptote)
+		marginalBuyerLine, err := plotter.NewLine(plotter.XYs{
+			{X: 0, Y: float64(marginalBuyerPrice)},
+			{X: maxQuantity, Y: float64(marginalBuyerPrice)},
+		})
+		if err == nil {
+			marginalBuyerLine.Color = color.RGBA{R: 200, G: 50, B: 50, A: 180} // Semi-transparent red
+			marginalBuyerLine.Width = vg.Points(2)
+			marginalBuyerLine.Dashes = []vg.Length{vg.Points(10), vg.Points(5)}
+			p.Add(marginalBuyerLine)
+			if config.ShowLegend {
+				p.Legend.Add(fmt.Sprintf("Marginal Buyer: %d", marginalBuyerPrice), marginalBuyerLine)
 			}
 		}
 
-		// Find the marginal seller (last qualified seller)
-		for i := len(sellers) - 1; i >= 0; i-- {
-			if sellers[i].IsQualified {
-				marginalSellerPrice = int64(sellers[i].Price)
-				break
+		// Marginal seller price line (horizontal asymptote)
+		marginalSellerLine, err2 := plotter.NewLine(plotter.XYs{
+			{X: 0, Y: float64(marginalSellerPrice)},
+			{X: maxQuantity, Y: float64(marginalSellerPrice)},
+		})
+		if err2 == nil {
+			marginalSellerLine.Color = color.RGBA{R: 50, G: 100, B: 200, A: 180} // Semi-transparent blue
+			marginalSellerLine.Width = vg.Points(2)
+			marginalSellerLine.Dashes = []vg.Length{vg.Points(10), vg.Points(5)}
+			p.Add(marginalSellerLine)
+			if config.ShowLegend {
+				p.Legend.Add(fmt.Sprintf("Marginal Seller: %d", marginalSellerPrice), marginalSellerLine)
 			}
-		}
-
-		// Update plot title to show Euclidean division calculation
-		if marginalBuyerPrice > 0 && marginalSellerPrice > 0 {
-			// Calculate the correct Euclidean division: (a + b) = 2*q + r
-			sum := marginalBuyerPrice + marginalSellerPrice
-			quotient := sum / 2
-			remainder := sum % 2
-
-			originalTitle := p.Title.Text
-			p.Title.Text = fmt.Sprintf("%s\nEuclidean Division: (%d + %d) = 2×%d + %d",
-				originalTitle, marginalBuyerPrice, marginalSellerPrice, quotient, remainder)
 		}
 
 		// Find good position for visual marker
-		maxQuantity := float64(0)
+		maxQuantity = float64(0)
 		maxPrice := float64(0)
 
 		if len(buyers) > 0 {

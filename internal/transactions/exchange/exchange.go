@@ -633,6 +633,33 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 		return totalEnergyTraded, totalCoinsTraded, len(qualifiedBuyers), len(qualifiedSellers)
 	}
 
+	// DEBUG: Print input data to see what's actually being processed
+	fmt.Printf("🔍 AUCTION INPUT DEBUG:\n")
+	fmt.Printf("  Buyers (%d):\n", len(buyers))
+	for _, buyer := range buyers {
+		price := "nil"
+		if buyer.Data.Price != nil {
+			price = buyer.Data.Price.String()
+		}
+		quantity := "nil"
+		if buyer.Data.Quantity != nil {
+			quantity = buyer.Data.Quantity.String()
+		}
+		fmt.Printf("    [%d] Price=%s, Quantity=%s\n", buyer.Index, price, quantity)
+	}
+	fmt.Printf("  Sellers (%d):\n", len(sellers))
+	for _, seller := range sellers {
+		price := "nil"
+		if seller.Data.Price != nil {
+			price = seller.Data.Price.String()
+		}
+		quantity := "nil"
+		if seller.Data.Quantity != nil {
+			quantity = seller.Data.Quantity.String()
+		}
+		fmt.Printf("    [%d] Price=%s, Quantity=%s\n", seller.Index, price, quantity)
+	}
+
 	// Find intersection point
 	clearingPrice, auctioneerCommission, tradingOccurs := findClearingPrice(buyers, sellers)
 
@@ -654,6 +681,13 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 
 	// Execute trades for qualifying participants
 	totalEnergyTraded, totalCoinsTraded, qualifiedBuyers, qualifiedSellers := executeTradesAtClearingPrice(buyers, sellers, clearingPrice, auctioneerCommission)
+
+	// DEBUG: Print auction results
+	fmt.Printf("🎯 AUCTION RESULT DEBUG:\n")
+	fmt.Printf("  Clearing Price: %v\n", clearingPrice)
+	fmt.Printf("  Commission Per Unit: %v\n", auctioneerCommission)
+	fmt.Printf("  Total Energy Traded: %d\n", totalEnergyTraded)
+	fmt.Printf("  Qualified Buyers: %d, Qualified Sellers: %d\n", qualifiedBuyers, qualifiedSellers)
 
 	// Calculate total commission collected (commission per unit * total units traded)
 	totalCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(totalEnergyTraded))

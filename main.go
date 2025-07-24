@@ -704,6 +704,22 @@ func executeExchangePhase(state *ProtocolState) error {
 				fmt.Printf("   💰 Verify commission: %v coins\n", compositeResult.AuctionExecution.AuctioneerCommission)
 				fmt.Printf("   📈 Verify volume: %d energy units\n", compositeResult.AuctionExecution.TotalEnergyTraded)
 			}
+
+			// Generate JSON export with detailed exchange mappings
+			exportDir := "exchange_data"
+			if err := os.MkdirAll(exportDir, 0755); err != nil {
+				fmt.Printf("Warning: Could not create exchange data directory: %v\n", err)
+			} else {
+				jsonFilename := fmt.Sprintf("%s.json", plotTitle)
+				err = exchange.ExportAuctionToJSON(inputs, state.Config.Roles, compositeResult.AuctionExecution, exportDir, jsonFilename)
+				if err != nil {
+					fmt.Printf("Warning: Could not generate JSON export: %v\n", err)
+				} else {
+					fmt.Printf("📄 Exchange mapping saved: %s/%s\n", exportDir, jsonFilename)
+					fmt.Printf("   🔍 Use this file to verify all exchange calculations\n")
+					fmt.Printf("   📋 Contains: before/after states, trades, conservation, Euclidean division\n")
+				}
+			}
 		}
 	}
 
