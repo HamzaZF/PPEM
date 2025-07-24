@@ -327,9 +327,6 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 
 	// Add Euclidean division calculation visualization
 	if auctionResult.ClearingPrice != nil && auctionResult.AuctioneerCommission != nil {
-		clearingPrice := auctionResult.ClearingPrice.Int64()
-		commission := auctionResult.AuctioneerCommission.Int64()
-
 		// Find marginal buyer and seller prices (the intersection participants)
 		var marginalBuyerPrice, marginalSellerPrice int64
 
@@ -351,9 +348,14 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 
 		// Update plot title to show Euclidean division calculation
 		if marginalBuyerPrice > 0 && marginalSellerPrice > 0 {
+			// Calculate the correct Euclidean division: (a + b) = 2*q + r
+			sum := marginalBuyerPrice + marginalSellerPrice
+			quotient := sum / 2
+			remainder := sum % 2
+
 			originalTitle := p.Title.Text
 			p.Title.Text = fmt.Sprintf("%s\nEuclidean Division: (%d + %d) = 2×%d + %d",
-				originalTitle, marginalBuyerPrice, marginalSellerPrice, clearingPrice, commission)
+				originalTitle, marginalBuyerPrice, marginalSellerPrice, quotient, remainder)
 		}
 
 		// Find good position for visual marker
