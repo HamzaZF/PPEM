@@ -1329,13 +1329,13 @@ func ExchangePhaseWithNotes(
 			Price:    regInputs[i].Price,
 			Coins:    regInputs[i].Coins,
 			Energy:   regInputs[i].Energy,
-			NoteData: noteInputs[i].NoteData, // Note data from CreateTx
+			NoteData: noteInputs[i].NoteData, // Use the NoteData field from DecryptedRegistration
 		}
-
-		// Override with note data if available (note data is more accurate)
-		if noteInputs[i].NoteData != nil {
-			inputs[i].Coins = noteInputs[i].NoteData.Value.Coins
-			inputs[i].Energy = noteInputs[i].NoteData.Value.Energy
+		// Use quantity from registration (second field in Price for quantity)
+		if len(regInputs) > i && regInputs[i].Quantity != nil {
+			inputs[i].Quantity = regInputs[i].Quantity
+		} else {
+			inputs[i].Quantity = big.NewInt(10) // Default quantity
 		}
 	}
 
@@ -1452,4 +1452,132 @@ func ExchangePhaseWithNotes(
 	}
 
 	return exchangeTx, compositeResult, proof, nil
+}
+
+// ExchangePhaseAuctionOnly runs the auction logic without ZK proof generation
+// This version supports flexible buyer/seller ratios and focuses on auction mechanics only
+func ExchangePhaseAuctionOnly(
+	regPayloads []RegistrationPayload,
+	auctioneerSk *big.Int,
+	auctioneerECDHPrivKey *ecdh.PrivateKey,
+	participantECDHPubKeys []*ecdh.PublicKey,
+	participantDHKeys []*bls12377_fr.Element,
+	auctioneerDHPk *bls12377.G1Affine,
+	roles map[int]zerocash.OrderType,
+	ledger *zerocash.Ledger,
+	params *zerocash.Params,
+) (txOut interface{}, info interface{}, err error) {
+	// Input validation (simplified - no circuit requirements)
+	if len(regPayloads) == 0 {
+		return nil, nil, fmt.Errorf("no registration payloads provided")
+	}
+	if auctioneerSk == nil {
+		return nil, nil, fmt.Errorf("auctioneer secret key is required")
+	}
+	if auctioneerECDHPrivKey == nil {
+		return nil, nil, fmt.Errorf("auctioneer ECDH private key is required")
+	}
+	if len(participantECDHPubKeys) != len(regPayloads) {
+		return nil, nil, fmt.Errorf("participant ECDH public keys count mismatch: expected %d, got %d", len(regPayloads), len(participantECDHPubKeys))
+	}
+
+	// 1. Decrypt registration data (from Algorithm 2 - DH+OTP encryption)
+	regInputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decrypt registration data: %w", err)
+	}
+
+	// 2. Decrypt transaction note data (from Algorithm 1 - ECDH+AES encryption)
+	noteInputs, err := DecryptTransactionNotes(regPayloads, auctioneerECDHPrivKey, participantECDHPubKeys)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decrypt transaction notes: %w", err)
+	}
+
+	// 3. Merge the decrypted data
+	inputs := make([]DecryptedRegistration, len(regPayloads))
+	for i := 0; i < len(regPayloads); i++ {
+		inputs[i] = DecryptedRegistration{
+			PkOut:    regInputs[i].PkOut,
+			SkIn:     regInputs[i].SkIn,
+			Price:    regInputs[i].Price,
+			Coins:    regInputs[i].Coins,
+			Energy:   regInputs[i].Energy,
+			NoteData: noteInputs[i].NoteData, // Decrypted note from CreateTx
+		}
+		// Use quantity from registration (second field in Price for quantity)
+		if len(regInputs) > i && regInputs[i].Quantity != nil {
+			inputs[i].Quantity = regInputs[i].Quantity
+		} else {
+			inputs[i].Quantity = big.NewInt(10) // Default quantity
+		}
+	}
+
+	// 4. Run the auction algorithm (off-circuit)
+	fmt.Printf("📊 Starting auction with %d participants:\n", len(inputs))
+
+	// Count buyers and sellers
+	buyerCount := 0
+	sellerCount := 0
+	for i, input := range inputs {
+		if role, exists := roles[i]; exists {
+			if role == zerocash.BUY {
+				buyerCount++
+				fmt.Printf("  🔵 Buyer %d: Bid %v for %v units\n", i, input.Price, input.Quantity)
+			} else {
+				sellerCount++
+				fmt.Printf("  🔴 Seller %d: Ask %v for %v units\n", i, input.Price, input.Quantity)
+			}
+		}
+	}
+
+	fmt.Printf("Market composition: %d buyers, %d sellers\n", buyerCount, sellerCount)
+
+	// Execute auction algorithm
+	auctionExecution := RunAuctionLogicWithCommissionAndAuctioneer(inputs, roles, auctioneerSk)
+
+	// Create auction result summary
+	auctionResult := struct {
+		Participants     int
+		Buyers           int
+		Sellers          int
+		ClearingPrice    *big.Int
+		VolumeTradedBy   *big.Int
+		Commission       *big.Int
+		SuccessfulTrades int
+	}{
+		Participants:     len(inputs),
+		Buyers:           buyerCount,
+		Sellers:          sellerCount,
+		ClearingPrice:    auctionExecution.ClearingPrice,
+		VolumeTradedBy:   big.NewInt(auctionExecution.TotalEnergyTraded), // Convert int64 to *big.Int
+		Commission:       auctionExecution.AuctioneerCommission,
+		SuccessfulTrades: len(auctionExecution.Outputs), // Assuming Outputs are the successful trades
+	}
+
+	// Create simplified exchange transaction output
+	exchangeTx := struct {
+		Participants int
+		AuctionType  string
+		Results      interface{}
+		Timestamp    time.Time
+	}{
+		Participants: len(inputs),
+		AuctionType:  "sealed-bid-double-auction",
+		Results:      auctionExecution,
+		Timestamp:    time.Now(),
+	}
+
+	fmt.Printf("🎯 Auction completed successfully!\n")
+	if auctionExecution.ClearingPrice != nil {
+		fmt.Printf("   Clearing price: %v\n", auctionExecution.ClearingPrice)
+		fmt.Printf("   Volume traded: %v units\n", auctionExecution.TotalEnergyTraded) // Assuming TotalEnergyTraded is the volume traded
+		fmt.Printf("   Successful trades: %d\n", len(auctionExecution.Outputs))        // Assuming Outputs are the successful trades
+		if auctionExecution.AuctioneerCommission.Cmp(big.NewInt(0)) > 0 {
+			fmt.Printf("   Auctioneer commission: %v coins\n", auctionExecution.AuctioneerCommission)
+		}
+	} else {
+		fmt.Printf("   No trades executed (no price intersection)\n")
+	}
+
+	return exchangeTx, auctionResult, nil
 }
