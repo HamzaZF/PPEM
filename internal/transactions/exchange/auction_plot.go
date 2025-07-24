@@ -258,7 +258,140 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 		}
 	}
 
-	// Note: Removed individual participant scatter points for cleaner step function visualization
+	// Add vertical dotted lines for each participant's quantity contribution
+	if len(buyers) > 0 {
+		for _, buyer := range buyers {
+			// Vertical line at each buyer's cumulative quantity
+			verticalPoints := plotter.XYs{
+				{X: buyer.CumulativeVolume, Y: 0},
+				{X: buyer.CumulativeVolume, Y: buyer.Price + 5}, // Extend slightly above
+			}
+
+			verticalLine, err := plotter.NewLine(verticalPoints)
+			if err == nil {
+				if buyer.IsQualified {
+					verticalLine.Color = color.RGBA{R: 231, G: 76, B: 60, A: 150} // Semi-transparent red for qualified buyers
+				} else {
+					verticalLine.Color = color.RGBA{R: 231, G: 76, B: 60, A: 80} // More transparent for unqualified
+				}
+				verticalLine.Width = vg.Points(1)
+				verticalLine.Dashes = []vg.Length{vg.Points(2), vg.Points(2)}
+				p.Add(verticalLine)
+			}
+
+			// Add participant markers for qualified buyers
+			if buyer.IsQualified {
+				textData := plotter.XYs{{X: buyer.CumulativeVolume, Y: buyer.Price + 2}}
+				scatter, err := plotter.NewScatter(textData)
+				if err == nil {
+					scatter.GlyphStyle.Color = color.RGBA{R: 231, G: 76, B: 60, A: 255}
+					scatter.GlyphStyle.Radius = vg.Points(2)
+					p.Add(scatter)
+				}
+			}
+		}
+	}
+
+	if len(sellers) > 0 {
+		for _, seller := range sellers {
+			// Vertical line at each seller's cumulative quantity
+			verticalPoints := plotter.XYs{
+				{X: seller.CumulativeVolume, Y: 0},
+				{X: seller.CumulativeVolume, Y: seller.Price + 5}, // Extend slightly above
+			}
+
+			verticalLine, err := plotter.NewLine(verticalPoints)
+			if err == nil {
+				if seller.IsQualified {
+					verticalLine.Color = color.RGBA{R: 52, G: 152, B: 219, A: 150} // Semi-transparent blue for qualified sellers
+				} else {
+					verticalLine.Color = color.RGBA{R: 52, G: 152, B: 219, A: 80} // More transparent for unqualified
+				}
+				verticalLine.Width = vg.Points(1)
+				verticalLine.Dashes = []vg.Length{vg.Points(2), vg.Points(2)}
+				p.Add(verticalLine)
+			}
+
+			// Add participant markers for qualified sellers
+			if seller.IsQualified {
+				textData := plotter.XYs{{X: seller.CumulativeVolume, Y: seller.Price - 2}}
+				scatter, err := plotter.NewScatter(textData)
+				if err == nil {
+					scatter.GlyphStyle.Color = color.RGBA{R: 52, G: 152, B: 219, A: 255}
+					scatter.GlyphStyle.Radius = vg.Points(2)
+					p.Add(scatter)
+				}
+			}
+		}
+	}
+
+	// Add Euclidean division calculation visualization
+	if auctionResult.ClearingPrice != nil && auctionResult.AuctioneerCommission != nil {
+		clearingPrice := auctionResult.ClearingPrice.Int64()
+		commission := auctionResult.AuctioneerCommission.Int64()
+
+		// Find marginal buyer and seller prices (the intersection participants)
+		var marginalBuyerPrice, marginalSellerPrice int64
+
+		// Find the marginal buyer (last qualified buyer)
+		for i := len(buyers) - 1; i >= 0; i-- {
+			if buyers[i].IsQualified {
+				marginalBuyerPrice = int64(buyers[i].Price)
+				break
+			}
+		}
+
+		// Find the marginal seller (last qualified seller)
+		for i := len(sellers) - 1; i >= 0; i-- {
+			if sellers[i].IsQualified {
+				marginalSellerPrice = int64(sellers[i].Price)
+				break
+			}
+		}
+
+		// Update plot title to show Euclidean division calculation
+		if marginalBuyerPrice > 0 && marginalSellerPrice > 0 {
+			originalTitle := p.Title.Text
+			p.Title.Text = fmt.Sprintf("%s\nEuclidean Division: (%d + %d) = 2×%d + %d",
+				originalTitle, marginalBuyerPrice, marginalSellerPrice, clearingPrice, commission)
+		}
+
+		// Find good position for visual marker
+		maxQuantity := float64(0)
+		maxPrice := float64(0)
+
+		if len(buyers) > 0 {
+			if buyers[len(buyers)-1].CumulativeVolume > maxQuantity {
+				maxQuantity = buyers[len(buyers)-1].CumulativeVolume
+			}
+			if buyers[0].Price > maxPrice {
+				maxPrice = buyers[0].Price
+			}
+		}
+		if len(sellers) > 0 {
+			if sellers[len(sellers)-1].CumulativeVolume > maxQuantity {
+				maxQuantity = sellers[len(sellers)-1].CumulativeVolume
+			}
+			for _, seller := range sellers {
+				if seller.Price > maxPrice {
+					maxPrice = seller.Price
+				}
+			}
+		}
+
+		// Position calculation marker in top-right area
+		annotationX := maxQuantity * 0.85
+		annotationY := maxPrice * 0.9
+
+		// Add a distinctive marker for the Euclidean division point
+		annotationPoint := plotter.XYs{{X: annotationX, Y: annotationY}}
+		annotationScatter, err := plotter.NewScatter(annotationPoint)
+		if err == nil {
+			annotationScatter.GlyphStyle.Color = color.RGBA{R: 243, G: 156, B: 18, A: 255} // Orange like clearing price
+			annotationScatter.GlyphStyle.Radius = vg.Points(3)
+			p.Add(annotationScatter)
+		}
+	}
 
 	// Position legend
 	if config.ShowLegend {
