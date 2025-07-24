@@ -393,57 +393,33 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 			}
 		}
 
-		// Find intersection: marginal buyer/seller where supply meets demand
+		// Find the REAL intersection: where supply meets demand at maximum volume
 		var marginalBuyerPrice, marginalSellerPrice *big.Int
-		buyerIdx, sellerIdx := 0, 0
+		var maxValidQuantity int64 = 0
 
-		for buyerIdx < len(buyerSteps) && sellerIdx < len(sellerSteps) {
-			buyerStep := buyerSteps[buyerIdx]
-			sellerStep := sellerSteps[sellerIdx]
+		if len(buyerSteps) > 0 && len(sellerSteps) > 0 {
+			// Find the intersection that maximizes traded quantity
+			for bIdx := 0; bIdx < len(buyerSteps); bIdx++ {
+				for sIdx := 0; sIdx < len(sellerSteps); sIdx++ {
+					buyer := buyerSteps[bIdx]
+					seller := sellerSteps[sIdx]
 
-			// Check if curves still intersect at this quantity level
-			if buyerStep.price.Cmp(sellerStep.price) >= 0 {
-				// Valid intersection - this could be the marginal point
-				marginalBuyerPrice = buyerStep.price
-				marginalSellerPrice = sellerStep.price
+					// Check if this is a valid trade (buyer willing to pay >= seller asking)
+					if buyer.price.Cmp(seller.price) >= 0 {
+						// Calculate how much can be traded at this price intersection
+						tradableQty := buyer.cumulativeQty
+						if seller.cumulativeQty < tradableQty {
+							tradableQty = seller.cumulativeQty
+						}
 
-				// Check if this is the intersection point by looking ahead
-				nextBuyerPrice := (*big.Int)(nil)
-				nextSellerPrice := (*big.Int)(nil)
-
-				// Find next buyer price if we advance
-				if buyerStep.cumulativeQty <= sellerStep.cumulativeQty {
-					if buyerIdx+1 < len(buyerSteps) {
-						nextBuyerPrice = buyerSteps[buyerIdx+1].price
+						// Keep the intersection that allows maximum trading volume
+						if tradableQty > maxValidQuantity {
+							maxValidQuantity = tradableQty
+							marginalBuyerPrice = buyer.price
+							marginalSellerPrice = seller.price
+						}
 					}
-				} else {
-					nextBuyerPrice = buyerStep.price // Same buyer
 				}
-
-				// Find next seller price if we advance
-				if sellerStep.cumulativeQty <= buyerStep.cumulativeQty {
-					if sellerIdx+1 < len(sellerSteps) {
-						nextSellerPrice = sellerSteps[sellerIdx+1].price
-					}
-				} else {
-					nextSellerPrice = sellerStep.price // Same seller
-				}
-
-				// If next step would not intersect, this is the marginal intersection
-				if nextBuyerPrice == nil || nextSellerPrice == nil || nextBuyerPrice.Cmp(nextSellerPrice) < 0 {
-					// This is the marginal intersection point
-					break
-				}
-
-				// Move to next step based on cumulative quantity
-				if buyerStep.cumulativeQty <= sellerStep.cumulativeQty {
-					buyerIdx++
-				} else {
-					sellerIdx++
-				}
-			} else {
-				// No more intersections
-				break
 			}
 		}
 
@@ -633,33 +609,6 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 		return totalEnergyTraded, totalCoinsTraded, len(qualifiedBuyers), len(qualifiedSellers)
 	}
 
-	// DEBUG: Print input data to see what's actually being processed
-	fmt.Printf("🔍 AUCTION INPUT DEBUG:\n")
-	fmt.Printf("  Buyers (%d):\n", len(buyers))
-	for _, buyer := range buyers {
-		price := "nil"
-		if buyer.Data.Price != nil {
-			price = buyer.Data.Price.String()
-		}
-		quantity := "nil"
-		if buyer.Data.Quantity != nil {
-			quantity = buyer.Data.Quantity.String()
-		}
-		fmt.Printf("    [%d] Price=%s, Quantity=%s\n", buyer.Index, price, quantity)
-	}
-	fmt.Printf("  Sellers (%d):\n", len(sellers))
-	for _, seller := range sellers {
-		price := "nil"
-		if seller.Data.Price != nil {
-			price = seller.Data.Price.String()
-		}
-		quantity := "nil"
-		if seller.Data.Quantity != nil {
-			quantity = seller.Data.Quantity.String()
-		}
-		fmt.Printf("    [%d] Price=%s, Quantity=%s\n", seller.Index, price, quantity)
-	}
-
 	// Find intersection point
 	clearingPrice, auctioneerCommission, tradingOccurs := findClearingPrice(buyers, sellers)
 
@@ -681,13 +630,6 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 
 	// Execute trades for qualifying participants
 	totalEnergyTraded, totalCoinsTraded, qualifiedBuyers, qualifiedSellers := executeTradesAtClearingPrice(buyers, sellers, clearingPrice, auctioneerCommission)
-
-	// DEBUG: Print auction results
-	fmt.Printf("🎯 AUCTION RESULT DEBUG:\n")
-	fmt.Printf("  Clearing Price: %v\n", clearingPrice)
-	fmt.Printf("  Commission Per Unit: %v\n", auctioneerCommission)
-	fmt.Printf("  Total Energy Traded: %d\n", totalEnergyTraded)
-	fmt.Printf("  Qualified Buyers: %d, Qualified Sellers: %d\n", qualifiedBuyers, qualifiedSellers)
 
 	// Calculate total commission collected (commission per unit * total units traded)
 	totalCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(totalEnergyTraded))
