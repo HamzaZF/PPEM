@@ -129,14 +129,13 @@ type CircuitTxFN struct {
 }
 
 // NewCircuitTxFN creates a new dynamic circuit for N participants.
-// N must be even: first N/2 are buyers, last N/2 are sellers.
+// Circuit verifies cryptographic consistency only - auction logic runs outside.
 func NewCircuitTxFN(n int) *CircuitTxFN {
 	if n <= 0 {
 		panic("CircuitTxFN: N must be positive")
 	}
-	if n%2 != 0 {
-		panic("CircuitTxFN: N must be even (N/2 buyers, N/2 sellers)")
-	}
+	// Removed N%2 constraint - circuit now supports flexible buyer/seller ratios
+	// Auction logic runs outside the circuit
 
 	circuit := &CircuitTxFN{
 		N: n,

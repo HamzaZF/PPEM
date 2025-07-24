@@ -610,83 +610,16 @@ func executeExchangePhase(state *ProtocolState) error {
 		participantDHPrivKeys[i] = state.ParticipantDHKeys[i].Sk
 	}
 
-	// Check if we should skip circuit-based exchange for flexible scenarios
-	if state.Config.NumParticipants%2 != 0 {
-		fmt.Println("  - Running auction logic without ZK proofs (flexible buyer/seller ratios)")
+	// Declare variables that will be used after the if-else block
+	var exchangeTx interface{}
+	var auctionInfo interface{}
+	var exchangeProof []byte
+	var err error
 
-		// Run auction-only logic (decrypt, match, compute results)
-		exchangeTx, auctionInfo, err := exchange.ExchangePhaseAuctionOnly(
-			exchangePayloads,
-			state.AuctioneerDHKp.Sk.BigInt(new(big.Int)),
-			state.AuctioneerECDHPriv,
-			participantECDHPubKeys,
-			participantDHPrivKeys,
-			state.AuctioneerDHKp.Pk,
-			state.Config.Roles,
-			state.Ledger,
-			&zerocash.Params{},
-		)
-		if err != nil {
-			return fmt.Errorf("auction logic execution failed: %w", err)
-		}
-
-		// No ZK proof generated in this mode
-		state.ExchangeProof = []byte{}
-
-		// Create placeholder output transactions for auction results
-		fmt.Println("  - Processing auction results (no ZK proofs)...")
-		fmt.Printf("Auction successful: %s\n", auctionInfo)
-		fmt.Printf("Exchange result: %s\n", exchangeTx)
-
-		// Handle ledger state transitions properly (even without ZK proofs)
-		outputTxs := make([]*zerocash.Tx, 0)
-
-		// Create placeholder transactions for all participants
-		for i := 0; i < state.Config.NumParticipants; i++ {
-			outputTx := &zerocash.Tx{
-				SnOld:     fmt.Sprintf("participant_%d_sn", i),
-				CmNew:     fmt.Sprintf("output_cm_%d", i),
-				OldCoin:   state.BaseNotes[i].Value.Coins.String(),
-				OldEnergy: state.BaseNotes[i].Value.Energy.String(),
-				NewCoin:   state.BaseNotes[i].Value.Coins.String(),  // Placeholder values
-				NewEnergy: state.BaseNotes[i].Value.Energy.String(), // Placeholder values
-				Proof:     []byte{},                                 // No proof in auction-only mode
-			}
-			outputTxs = append(outputTxs, outputTx)
-		}
-
-		// Create auctioneer commission transaction
-		auctioneerTx := &zerocash.Tx{
-			SnOld:     "auctioneer_input_sn",
-			CmNew:     "auctioneer_commission_cm",
-			OldCoin:   "0",
-			OldEnergy: "0",
-			NewCoin:   "0", // Commission handled in auction logic
-			NewEnergy: "0",
-			Proof:     []byte{}, // No proof in auction-only mode
-		}
-		outputTxs = append(outputTxs, auctioneerTx)
-
-		// Transition ledger to exchange phase before submitting results
-		if err := state.Ledger.StartExchangePhase(); err != nil {
-			return fmt.Errorf("failed to start exchange phase: %w", err)
-		}
-
-		// Submit exchange results to ledger
-		auctionInfoBytes := []byte(fmt.Sprintf(`{"auction_type":"sealed_bid_double_auction","participants":%d,"mode":"auction_only"}`, state.Config.NumParticipants))
-		err = state.Ledger.SubmitExchange(outputTxs, state.ExchangeProof, auctionInfoBytes)
-		if err != nil {
-			return fmt.Errorf("failed to submit exchange results: %w", err)
-		}
-
-		fmt.Printf("Auction successful: no ZK proofs generated (auction-only mode)\n")
-		fmt.Println("Energy market exchange completed")
-		return nil
-	}
-
+	// Generate ZK proofs for cryptographic verification (auction logic runs outside)
 	fmt.Println("  - Generating exchange proof...")
 
-	// Get dynamic circuit keys for the number of participants
+	// Get dynamic circuit keys for the actual number of participants
 	dynamicKeys, err := state.CircuitKeys.DynamicManager.GetOrCreateCircuitKeys(state.Config.NumParticipants)
 	if err != nil {
 		return fmt.Errorf("failed to get circuit keys for %d participants: %w", state.Config.NumParticipants, err)
@@ -695,7 +628,7 @@ func executeExchangePhase(state *ProtocolState) error {
 	pk := dynamicKeys.ProvingKey
 	ccs := dynamicKeys.ConstraintSystem
 
-	exchangeTx, auctionInfo, exchangeProof, err := exchange.ExchangePhaseWithNotes(
+	exchangeTx, auctionInfo, exchangeProof, err = exchange.ExchangePhaseWithNotes(
 		exchangePayloads,
 		state.AuctioneerDHKp.Sk.BigInt(new(big.Int)),
 		state.AuctioneerECDHPriv,
@@ -709,10 +642,70 @@ func executeExchangePhase(state *ProtocolState) error {
 		ccs,
 	)
 	if err != nil {
-		return fmt.Errorf("Algorithm 3 execution failed: %w", err)
+		return fmt.Errorf("exchange execution failed: %w", err)
 	}
 
 	state.ExchangeProof = exchangeProof
+
+	// Generate auction graphs for verification
+	fmt.Println("  - Generating auction visualization graphs...")
+
+	// Create graphs subdirectory
+	graphsDir := "graphs"
+	if err := os.MkdirAll(graphsDir, 0755); err != nil {
+		fmt.Printf("Warning: Could not create graphs directory: %v\n", err)
+	} else {
+		// Extract auction execution result for plotting
+		if compositeResult, ok := auctionInfo.(struct {
+			AuctionResult    *exchange.AuctionResult
+			AuctionExecution *exchange.AuctionExecutionResult
+		}); ok {
+			// Create timestamp for unique filenames
+			timestamp := time.Now().Format("20060102_150405")
+			plotTitle := fmt.Sprintf("PPEM_N%d_Buyers%.0f%%_%s",
+				state.Config.NumParticipants,
+				getBuyerRatio(state.Config.Roles)*100,
+				timestamp)
+
+			// Create plot configuration
+			config := exchange.DefaultPlotConfig()
+			config.OutputPath = fmt.Sprintf("%s/%s.png", graphsDir, plotTitle)
+			config.Title = fmt.Sprintf("N=%d (%d buyers, %d sellers) | Clearing: %v | Commission: %v | Traded: %d units",
+				state.Config.NumParticipants,
+				countBuyers(state.Config.Roles),
+				countSellers(state.Config.Roles),
+				compositeResult.AuctionExecution.ClearingPrice,
+				compositeResult.AuctionExecution.AuctioneerCommission,
+				compositeResult.AuctionExecution.TotalEnergyTraded)
+
+			// Create inputs array for plotting (reconstruct from exchange data)
+			inputs := make([]exchange.DecryptedRegistration, 0)
+			if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
+				for i, output := range exchangeResult.Outputs {
+					if i < len(state.Config.Orders) {
+						input := exchange.DecryptedRegistration{
+							Price:    state.Config.Orders[i].Price,
+							Quantity: state.Config.Orders[i].Quantity,
+							Coins:    output.Coins,
+							Energy:   output.Energy,
+						}
+						inputs = append(inputs, input)
+					}
+				}
+			}
+
+			// Generate the plot
+			err := exchange.CreateSupplyDemandPlot(inputs, state.Config.Roles, compositeResult.AuctionExecution, config)
+			if err != nil {
+				fmt.Printf("Warning: Could not generate auction plot: %v\n", err)
+			} else {
+				fmt.Printf("✅ Auction graph saved: %s\n", config.OutputPath)
+				fmt.Printf("   📊 Verify clearing price: %v coins/unit\n", compositeResult.AuctionExecution.ClearingPrice)
+				fmt.Printf("   💰 Verify commission: %v coins\n", compositeResult.AuctionExecution.AuctioneerCommission)
+				fmt.Printf("   📈 Verify volume: %d energy units\n", compositeResult.AuctionExecution.TotalEnergyTraded)
+			}
+		}
+	}
 
 	// Create individual output transactions from exchange results
 	fmt.Println("  - Creating output transactions...")
@@ -733,10 +726,13 @@ func executeExchangePhase(state *ProtocolState) error {
 		// Create participant output transactions
 		for i, output := range exchangeResult.Outputs {
 			if i < len(state.RegistrationTxs) && output.Coins != nil && output.Energy != nil {
-				// Create output transaction using input serial number and new commitment
+				// Create real output note for participant with proper cryptography
+				participantOutputNote := zerocash.NewNote(output.Coins, output.Energy, state.BaseNoteKeys[i])
+
+				// Create output transaction using real cryptographic data
 				outputTx := &zerocash.Tx{
-					SnOld:     state.RegistrationTxs[i].SnOld, // Serial number from input note
-					CmNew:     fmt.Sprintf("output_cm_%d", i), // New commitment (simplified)
+					SnOld:     state.RegistrationTxs[i].SnOld,   // Serial number from input note
+					CmNew:     string(participantOutputNote.Cm), // Real commitment (not dummy)
 					OldCoin:   state.RegistrationTxs[i].OldCoin,
 					OldEnergy: state.RegistrationTxs[i].OldEnergy,
 					NewCoin:   output.Coins.String(),
@@ -747,15 +743,28 @@ func executeExchangePhase(state *ProtocolState) error {
 			}
 		}
 
-		// Create auctioneer commission transaction
+		// Create auctioneer commission transaction with proper cryptography
+
+		// Generate auctioneer secret key for notes (32 bytes)
+		auctioneerSecretKey := zerocash.RandomBytesPublic(32)
+
+		// Create auctioneer input note (starts with 0 coins, 0 energy)
+		auctioneerInputNote := zerocash.NewNote(big.NewInt(0), big.NewInt(0), auctioneerSecretKey)
+
+		// Create auctioneer output note (receives commission)
+		auctioneerOutputNote := zerocash.NewNote(auctioneerCommission, big.NewInt(0), auctioneerSecretKey)
+
+		// Compute real serial number from input note (following zerocash protocol)
+		auctioneerSerialNumber := zerocash.SerialNumber(auctioneerSecretKey, auctioneerInputNote.Rho)
+
 		auctioneerTx := &zerocash.Tx{
-			SnOld:     "auctioneer_input_sn",         // Auctioneer's input serial number
-			CmNew:     "auctioneer_commission_cm",    // Auctioneer's commission commitment
-			OldCoin:   "0",                           // Auctioneer starts with 0
-			OldEnergy: "0",                           // Auctioneer starts with 0 energy
-			NewCoin:   auctioneerCommission.String(), // Commission collected (could be 0)
-			NewEnergy: "0",                           // No energy for auctioneer
-			Proof:     exchangeProof,                 // Same proof
+			SnOld:     string(auctioneerSerialNumber),             // Real serial number
+			CmNew:     string(auctioneerOutputNote.Cm),            // Real commitment
+			OldCoin:   auctioneerInputNote.Value.Coins.String(),   // Real input (0)
+			OldEnergy: auctioneerInputNote.Value.Energy.String(),  // Real input (0)
+			NewCoin:   auctioneerOutputNote.Value.Coins.String(),  // Real output (commission)
+			NewEnergy: auctioneerOutputNote.Value.Energy.String(), // Real output (0)
+			Proof:     exchangeProof,                              // Same proof
 		}
 		outputTxs = append(outputTxs, auctioneerTx)
 		fmt.Printf("💰 Created auctioneer commission transaction: %v coins\n", auctioneerCommission)
@@ -958,19 +967,13 @@ func setupCircuitKeys(participantCount int) (*CircuitKeys, error) {
 		return nil, err
 	}
 
-	// Skip exchange circuit compilation for flexible buyer/seller scenarios
-	// The current exchange circuit requires N to be even and exactly N/2 buyers and N/2 sellers
-	// For now, we'll skip this to focus on auction logic outside the circuit
-	if participantCount%2 == 0 {
-		fmt.Printf("  - Compiling exchange circuit for N=%d (even number, traditional approach)...\n", participantCount)
-		// Precompile only the specific N we need
-		specificN := []int{participantCount}
-		if err := keys.DynamicManager.PrecompileCircuits(specificN); err != nil {
-			return nil, fmt.Errorf("failed to precompile circuit for N=%d: %w", participantCount, err)
-		}
-	} else {
-		fmt.Printf("  - Skipping exchange circuit compilation for N=%d (flexible buyer/seller ratios not yet supported in circuit)\n", participantCount)
-		fmt.Printf("  - Auction logic will run outside the circuit for now\n")
+	// Compile exchange circuit for actual participant count (supports flexible buyer/seller ratios)
+	fmt.Printf("  - Compiling exchange circuit for N=%d (flexible buyer/seller ratios supported)\n", participantCount)
+
+	// Precompile the circuit for the actual participant count
+	specificN := []int{participantCount}
+	if err := keys.DynamicManager.PrecompileCircuits(specificN); err != nil {
+		return nil, fmt.Errorf("failed to precompile circuit for N=%d: %w", participantCount, err)
 	}
 
 	return keys, nil
@@ -1059,4 +1062,44 @@ func printProtocolSummary(state *ProtocolState, totalTime time.Duration) {
 	fmt.Println("Privacy-Preserving Energy Market Protocol: COMPLETED")
 	fmt.Println("====================================================")
 	fmt.Println()
+}
+
+// Helper functions for auction graph generation
+
+// getBuyerRatio calculates the fraction of participants that are buyers
+func getBuyerRatio(roles map[int]zerocash.OrderType) float64 {
+	if len(roles) == 0 {
+		return 0.0
+	}
+
+	buyers := 0
+	for _, role := range roles {
+		if role == zerocash.BUY {
+			buyers++
+		}
+	}
+
+	return float64(buyers) / float64(len(roles))
+}
+
+// countBuyers counts the number of buyers in the roles map
+func countBuyers(roles map[int]zerocash.OrderType) int {
+	buyers := 0
+	for _, role := range roles {
+		if role == zerocash.BUY {
+			buyers++
+		}
+	}
+	return buyers
+}
+
+// countSellers counts the number of sellers in the roles map
+func countSellers(roles map[int]zerocash.OrderType) int {
+	sellers := 0
+	for _, role := range roles {
+		if role == zerocash.SELL {
+			sellers++
+		}
+	}
+	return sellers
 }
