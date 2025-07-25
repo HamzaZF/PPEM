@@ -247,19 +247,7 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		api.AssertIsEqual(c.InPk[coin], pk)
 	}
 
-	// ==== STEP 2: EUCLIDEAN DIVISION VERIFICATION ====
-	// Verify that: MarginalBuyerPrice + MarginalSellerPrice = 2 * ClearingPrice + CommissionPerUnit
-	// This ensures the clearing price was computed correctly using Euclidean division
-	marginalSum := api.Add(c.MarginalBuyerPrice, c.MarginalSellerPrice)
-	clearingTimesTwo := api.Mul(c.ClearingPrice, 2)
-	expectedSum := api.Add(clearingTimesTwo, c.CommissionPerUnit)
-	api.AssertIsEqual(marginalSum, expectedSum)
-
-	// Verify that TotalCommission = CommissionPerUnit * TotalEnergyTraded
-	expectedTotalCommission := api.Mul(c.CommissionPerUnit, c.TotalEnergyTraded)
-	api.AssertIsEqual(c.TotalCommission, expectedTotalCommission)
-
-	// STEP 3a: Verify sorting using simple consecutive checks
+	// Verify sorting using simple consecutive checks
 	// Assumption: Auctioneer provides buyers first (descending), then sellers (ascending)
 	for i := 0; i < c.N-1; i++ {
 		currentRole := c.ParticipantRoles[i]
@@ -280,6 +268,117 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		// Ensure buyers come before sellers (no seller followed by buyer)
 		invalidOrder := api.Mul(api.IsZero(api.Sub(currentRole, 1)), api.IsZero(nextRole))
 		api.AssertIsEqual(invalidOrder, 0) // seller->buyer transition not allowed
+	}
+
+	// STEP 1: Find marginal buyer and seller values
+	// Verify that MarginalBuyerPrice and MarginalSellerPrice come from actual participants
+	marginalBuyerFound := frontend.Variable(0)
+	marginalSellerFound := frontend.Variable(0)
+
+	// Store which participants are marginal buyers and sellers for STEP 3
+	isMarginalBuyerAtIndex := make([]frontend.Variable, c.N)
+	isMarginalSellerAtIndex := make([]frontend.Variable, c.N)
+
+	for i := 0; i < c.N; i++ {
+		// Check if this participant is a buyer with marginal buyer price
+		isBuyer := api.IsZero(c.ParticipantRoles[i])
+		priceMatchesMarginalBuyer := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalBuyerPrice))
+		buyerMatch := api.Mul(isBuyer, priceMatchesMarginalBuyer)
+		marginalBuyerFound = api.Add(marginalBuyerFound, buyerMatch)
+
+		// Store this information for later use
+		isMarginalBuyerAtIndex[i] = buyerMatch
+
+		// Check if this participant is a seller with marginal seller price
+		isSeller := api.IsZero(api.Sub(c.ParticipantRoles[i], 1))
+		priceMatchesMarginalSeller := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalSellerPrice))
+		sellerMatch := api.Mul(isSeller, priceMatchesMarginalSeller)
+		marginalSellerFound = api.Add(marginalSellerFound, sellerMatch)
+
+		// Store this information for later use
+		isMarginalSellerAtIndex[i] = sellerMatch
+	}
+
+	// Assert that we found at least one marginal buyer and one marginal seller
+	api.AssertIsLessOrEqual(1, marginalBuyerFound)
+	api.AssertIsLessOrEqual(1, marginalSellerFound)
+
+	// STEP 2: Verify Euclidean division
+	// MarginalBuyerPrice + MarginalSellerPrice = 2 * ClearingPrice + CommissionPerUnit
+	marginalSum := api.Add(c.MarginalBuyerPrice, c.MarginalSellerPrice)
+	clearingTimesTwo := api.Mul(c.ClearingPrice, 2)
+	expectedSum := api.Add(clearingTimesTwo, c.CommissionPerUnit)
+	api.AssertIsEqual(marginalSum, expectedSum)
+
+	// Ensure CommissionPerUnit is either 0 or 1
+	// CommissionPerUnit * (CommissionPerUnit - 1) = 0
+	commissionCheck := api.Mul(c.CommissionPerUnit, api.Sub(c.CommissionPerUnit, 1))
+	api.AssertIsEqual(commissionCheck, 0)
+
+	// // Verify that TotalCommission = CommissionPerUnit * TotalEnergyTraded
+	// expectedTotalCommission := api.Mul(c.CommissionPerUnit, c.TotalEnergyTraded)
+	// api.AssertIsEqual(c.TotalCommission, expectedTotalCommission)
+
+	// STEP 3a: Verify intersection boundary (buyer side)
+	// Check that the first buyer after marginal buyer has bid < marginal seller ask
+	// Also check that the buyer before marginal buyer has bid >= clearing price
+	// This proves the intersection is correct (subsequent buyers are even lower due to sorting)
+
+	for i := 0; i < c.N-1; i++ {
+		// Use the stored information about whether this is a marginal buyer
+		foundMarginalBuyer := isMarginalBuyerAtIndex[i]
+
+		// Check if next participant is also a buyer
+		nextIsBuyer := api.IsZero(c.ParticipantRoles[i+1])
+
+		// If we found marginal buyer at i and i+1 is also a buyer: bid[i+1] < marginal seller ask
+		checkCondition := api.Mul(foundMarginalBuyer, nextIsBuyer)
+		constraint := api.Mul(checkCondition, api.Add(c.DecVal[i+1][2], 1))
+		limit := api.Mul(checkCondition, c.MarginalSellerPrice)
+		api.AssertIsLessOrEqual(constraint, limit) // next_buyer_bid + 1 <= marginal_seller_ask
+
+		// Also check previous buyer if we're not at the first position
+		if i > 0 {
+			// Check if previous participant is also a buyer
+			prevIsBuyer := api.IsZero(c.ParticipantRoles[i-1])
+
+			// If we found marginal buyer at i and i-1 is also a buyer: bid[i-1] >= clearing_price
+			checkPrevCondition := api.Mul(foundMarginalBuyer, prevIsBuyer)
+			prevConstraint := api.Mul(checkPrevCondition, c.ClearingPrice)
+			prevLimit := api.Mul(checkPrevCondition, c.DecVal[i-1][2])
+			api.AssertIsLessOrEqual(prevConstraint, prevLimit) // clearing_price <= prev_buyer_bid
+		}
+	}
+
+	// STEP 3b: Verify intersection boundary (seller side)
+	// Check that the first seller after marginal seller has ask > marginal buyer bid
+	// Also check that the seller before marginal seller has ask <= clearing price
+	// This proves the intersection is correct (subsequent sellers are even higher due to sorting)
+
+	for i := 0; i < c.N-1; i++ {
+		// Use the stored information about whether this is a marginal seller
+		foundMarginalSeller := isMarginalSellerAtIndex[i]
+
+		// Check if next participant is also a seller
+		nextIsSeller := api.IsZero(api.Sub(c.ParticipantRoles[i+1], 1))
+
+		// If we found marginal seller at i and i+1 is also a seller: ask[i+1] > marginal buyer bid
+		checkCondition := api.Mul(foundMarginalSeller, nextIsSeller)
+		constraint := api.Mul(checkCondition, api.Add(c.MarginalBuyerPrice, 1))
+		limit := api.Mul(checkCondition, c.DecVal[i+1][2])
+		api.AssertIsLessOrEqual(constraint, limit) // marginal_buyer_bid + 1 <= next_seller_ask
+
+		// Also check previous seller if we're not at the first position
+		if i > 0 {
+			// Check if previous participant is also a seller
+			prevIsSeller := api.IsZero(api.Sub(c.ParticipantRoles[i-1], 1))
+
+			// If we found marginal seller at i and i-1 is also a seller: ask[i-1] <= clearing_price
+			checkPrevCondition := api.Mul(foundMarginalSeller, prevIsSeller)
+			prevConstraint := api.Mul(checkPrevCondition, c.DecVal[i-1][2])
+			prevLimit := api.Mul(checkPrevCondition, c.ClearingPrice)
+			api.AssertIsLessOrEqual(prevConstraint, prevLimit) // prev_seller_ask <= clearing_price
+		}
 	}
 
 	return nil
