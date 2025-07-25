@@ -32,9 +32,9 @@ import (
 // Contains the ciphertext (encrypted registration fields), the participant's public key (for DH),
 // and optionally the encrypted note data from CreateTx.
 type RegistrationPayload struct {
-	Ciphertext [5]*big.Int           // (pkOut, skIn, bid, coins, energy)
-	PubKey     *sw_bls12377.G1Affine // Participant's public key (for DH)
-	TxNoteData []byte                // Encrypted note data from CreateTx (new field)
+	Ciphertext [7]*big.Int           // (pkOut, skIn, bid, coins, energy, role, quantity)
+	PubKey     *sw_bls12377.G1Affine // Participant's DH public key
+	TxNoteData []byte                // Encrypted note data from Algorithm 1
 }
 
 // DecryptedRegistration holds the decrypted registration data for a participant.
@@ -76,12 +76,12 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 		decrypted := DecZKRegGo(payload.Ciphertext, *shared)
 
 		result := DecryptedRegistration{
-			PkOut:    decrypted[0],   // pk^out
-			SkIn:     decrypted[1],   // sk^in
-			Price:    decrypted[2],   // price (formerly bid)
-			Quantity: big.NewInt(10), // TODO: quantity not yet encrypted, using default
-			Coins:    decrypted[3],   // coins
-			Energy:   decrypted[4],   // energy
+			PkOut:    decrypted[0], // pk^out
+			SkIn:     decrypted[1], // sk^in
+			Price:    decrypted[2], // price (formerly bid)
+			Quantity: decrypted[6], // quantity
+			Coins:    decrypted[3], // coins
+			Energy:   decrypted[4], // energy
 		}
 
 		// Note: Note data decryption is handled by DecryptTransactionNotes function
@@ -233,7 +233,7 @@ func SortParticipantsForCircuit(
 
 // DecZKRegGo implements the same decryption logic as the circuit's DecZKReg function.
 // Used for off-circuit decryption of registration payloads.
-func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
+func DecZKRegGo(c [7]*big.Int, encKey bls12377.G1Affine) [7]*big.Int {
 	h := mimcNative.NewMiMC()
 
 	// Use the same MiMC hash chain as in the circuit
@@ -260,14 +260,24 @@ func DecZKRegGo(c [5]*big.Int, encKey bls12377.G1Affine) [5]*big.Int {
 	h.Write(mask3)
 	mask4 := h.Sum(nil)
 
+	h.Reset()
+	h.Write(mask4)
+	mask5 := h.Sum(nil)
+
+	h.Reset()
+	h.Write(mask5)
+	mask6 := h.Sum(nil)
+
 	// Decrypt by subtracting the masks
 	dec0 := new(big.Int).Sub(c[0], new(big.Int).SetBytes(mask0))
 	dec1 := new(big.Int).Sub(c[1], new(big.Int).SetBytes(mask1))
 	dec2 := new(big.Int).Sub(c[2], new(big.Int).SetBytes(mask2))
 	dec3 := new(big.Int).Sub(c[3], new(big.Int).SetBytes(mask3))
 	dec4 := new(big.Int).Sub(c[4], new(big.Int).SetBytes(mask4))
+	dec5 := new(big.Int).Sub(c[5], new(big.Int).SetBytes(mask5))
+	dec6 := new(big.Int).Sub(c[6], new(big.Int).SetBytes(mask6))
 
-	return [5]*big.Int{dec0, dec1, dec2, dec3, dec4}
+	return [7]*big.Int{dec0, dec1, dec2, dec3, dec4, dec5, dec6}
 }
 
 // AuctionResult contains the results of the auction execution
@@ -848,8 +858,8 @@ func validateExchangeInputs(
 	// The dynamic circuit system will handle the scaling
 
 	for i, payload := range regPayloads {
-		if len(payload.Ciphertext) != 5 {
-			return fmt.Errorf("invalid ciphertext for payload %d: expected 5 elements, got %d", i, len(payload.Ciphertext))
+		if len(payload.Ciphertext) != 7 { // Changed from 5 to 7
+			return fmt.Errorf("invalid ciphertext for payload %d: expected 7 elements, got %d", i, len(payload.Ciphertext))
 		}
 		// Check if any element is nil
 		for j, elem := range payload.Ciphertext {
@@ -913,8 +923,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 	}
 
 	// Helper function to convert array of big.Int to slice of frontend.Variable
-	toVarSlice := func(arr [5]*big.Int) []frontend.Variable {
-		result := make([]frontend.Variable, 5)
+	toVarSlice := func(arr [7]*big.Int) []frontend.Variable {
+		result := make([]frontend.Variable, 7) // Changed from 5 to 7
 		for i, val := range arr {
 			result[i] = toVar(val)
 		}
@@ -923,8 +933,7 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 
 	// ==== POPULATE AUCTION PARAMETERS ====
 	circuit.ClearingPrice = toVar(auctionExecution.ClearingPrice)
-	circuit.TotalEnergyTraded = toVar(big.NewInt(auctionExecution.TotalEnergyTraded))
-	circuit.TotalCommission = toVar(auctionExecution.AuctioneerCommission)
+	// TotalEnergyTraded and TotalCommission are now computed in the circuit
 
 	// Calculate commission per unit
 	var commissionPerUnit *big.Int
@@ -939,36 +948,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 	circuit.MarginalBuyerPrice = toVar(auctionExecution.MarginalBuyerPrice)
 	circuit.MarginalSellerPrice = toVar(auctionExecution.MarginalSellerPrice)
 
-	// Count buyers to determine roles and qualification status
-	numBuyers := 0
-	for _, role := range roles {
-		if role == zerocash.BUY {
-			numBuyers++
-		}
-	}
-
-	// Set participant roles, traded quantities, and qualification status
-	for i := 0; i < n; i++ {
-		// Set role (0=BUY, 1=SELL)
-		if i < numBuyers {
-			circuit.ParticipantRoles[i] = "0" // Buyer
-		} else {
-			circuit.ParticipantRoles[i] = "1" // Seller
-		}
-
-		// Calculate traded quantity for this participant
-		var tradedQty int64 = 0
-		if i < len(inputs) && i < len(outputs) {
-			energyDiff := new(big.Int).Sub(outputs[i].Energy, inputs[i].Energy)
-			tradedQty = energyDiff.Int64()
-			if tradedQty < 0 {
-				tradedQty = -tradedQty // Absolute value
-			}
-		}
-		circuit.TradedQuantities[i] = toVar(big.NewInt(tradedQty))
-
-		// Qualification status is now determined by circuit from TradedQuantities (> 0 = qualified)
-	}
+	// Note: ParticipantRoles and TradedQuantities are now decrypted from registration data
+	// as DecVal[i][5] (role) and DecVal[i][6] (quantity), so no need to set them here.
 
 	// Helper to compute MiMC hash (same as circuit)
 	mimcHash := func(data ...*big.Int) *big.Int {
@@ -1170,7 +1151,7 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		} else {
 			// Padding participant: create consistent encrypted/decrypted pair
 			// For circuit to pass: C[i] = Encrypt(DecVal[i], SkT[i])
-			plaintext := [5]*big.Int{pkOut, skIn, bid, coins, energy} // Expected decrypted values
+			plaintext := [7]*big.Int{pkOut, skIn, bid, coins, energy, big.NewInt(0), big.NewInt(0)} // Expected decrypted values (padding: role=0/BUY, quantity=0)
 
 			// Encrypt the plaintext using the shared secret to get ciphertext
 			h := mimcNative.NewMiMC()
@@ -1197,13 +1178,23 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 			h.Write(mask3)
 			mask4 := h.Sum(nil)
 
+			h.Reset()
+			h.Write(mask4)
+			mask5 := h.Sum(nil)
+
+			h.Reset()
+			h.Write(mask5)
+			mask6 := h.Sum(nil)
+
 			// Create ciphertext by adding masks to plaintext
-			ciphertext := [5]*big.Int{
+			ciphertext := [7]*big.Int{
 				new(big.Int).Add(plaintext[0], new(big.Int).SetBytes(mask0)),
 				new(big.Int).Add(plaintext[1], new(big.Int).SetBytes(mask1)),
 				new(big.Int).Add(plaintext[2], new(big.Int).SetBytes(mask2)),
 				new(big.Int).Add(plaintext[3], new(big.Int).SetBytes(mask3)),
 				new(big.Int).Add(plaintext[4], new(big.Int).SetBytes(mask4)),
+				new(big.Int).Add(plaintext[5], new(big.Int).SetBytes(mask5)),
+				new(big.Int).Add(plaintext[6], new(big.Int).SetBytes(mask6)),
 			}
 
 			circuit.C[i] = toVarSlice(ciphertext)

@@ -13,10 +13,12 @@ import (
 type CircuitTxRegister struct {
 	// ====== PUBLIC VARIABLES ======
 	CmIn          frontend.Variable    `gnark:",public"` // Commitment of input note
-	CAux          [5]frontend.Variable `gnark:",public"` // Encrypted (pk, sk, bid, coins, energy)
+	CAux          [7]frontend.Variable `gnark:",public"` // Encrypted (pk, sk, bid, coins, energy, role, quantity)
 	GammaInEnergy frontend.Variable    `gnark:",public"` // Input note energy
 	GammaInCoins  frontend.Variable    `gnark:",public"` // Input note coins
 	Bid           frontend.Variable    `gnark:",public"` // Bid value
+	Role          frontend.Variable    `gnark:",public"` // Participant role (0=buyer, 1=seller)
+	Quantity      frontend.Variable    `gnark:",public"` // Desired trade quantity
 	G             sw_bls12377.G1Affine `gnark:",public"`
 	G_b           sw_bls12377.G1Affine `gnark:",public"`
 	G_r           sw_bls12377.G1Affine `gnark:",public"`
@@ -52,9 +54,9 @@ func (c *CircuitTxRegister) Define(api frontend.API) error {
 	pk := hasher.Sum()
 	api.AssertIsEqual(c.PkIn, pk)
 
-	// 3) Recompute cAux[j] = EncZKReg(pk, sk, bid, coins, energy, encKey)
-	encVal := EncZKReg(api, c.PkOut, c.SkIn, c.Bid, c.GammaInCoins, c.GammaInEnergy, c.EncKey)
-	for i := 0; i < 5; i++ {
+	// 3) Recompute cAux[j] = EncZKReg(pk, sk, bid, coins, energy, role, quantity, encKey)
+	encVal := EncZKReg(api, c.PkOut, c.SkIn, c.Bid, c.GammaInCoins, c.GammaInEnergy, c.Role, c.Quantity, c.EncKey)
+	for i := 0; i < 7; i++ {
 		api.AssertIsEqual(c.CAux[i], encVal[i])
 	}
 
@@ -74,9 +76,9 @@ func (c *CircuitTxRegister) Define(api frontend.API) error {
 	return nil
 }
 
-// EncZKReg implements MiMC-based encryption for registration.
-// It mimics the style of zerocash's note encryption, but for (pk, sk, bid, coins, energy).
-func EncZKReg(api frontend.API, pkOut, skIn, bid, coins, energy frontend.Variable, encKey sw_bls12377.G1Affine) [5]frontend.Variable {
+// EncZKReg encrypts registration data in the circuit for ZK verification.
+// Encrypts: (pkOut, skIn, bid, coins, energy, role, quantity)
+func EncZKReg(api frontend.API, pkOut, skIn, bid, coins, energy, role, quantity frontend.Variable, encKey sw_bls12377.G1Affine) [7]frontend.Variable {
 	hasher, _ := mimc.NewMiMC(api)
 	// Use encKey.X and encKey.Y as the base for the mask chain
 	hasher.Reset()
@@ -100,12 +102,22 @@ func EncZKReg(api frontend.API, pkOut, skIn, bid, coins, energy frontend.Variabl
 	hasher.Write(mask3)
 	mask4 := hasher.Sum()
 
+	hasher.Reset()
+	hasher.Write(mask4)
+	mask5 := hasher.Sum()
+
+	hasher.Reset()
+	hasher.Write(mask5)
+	mask6 := hasher.Sum()
+
 	// Encrypt each field by adding the mask
 	enc0 := api.Add(pkOut, mask0)
 	enc1 := api.Add(skIn, mask1)
 	enc2 := api.Add(bid, mask2)
 	enc3 := api.Add(coins, mask3)
 	enc4 := api.Add(energy, mask4)
+	enc5 := api.Add(role, mask5)
+	enc6 := api.Add(quantity, mask6)
 
-	return [5]frontend.Variable{enc0, enc1, enc2, enc3, enc4}
+	return [7]frontend.Variable{enc0, enc1, enc2, enc3, enc4, enc5, enc6}
 }

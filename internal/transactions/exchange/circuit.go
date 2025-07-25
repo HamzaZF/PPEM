@@ -27,12 +27,12 @@ const TRADING_VOLUME = 10
 //
 // Parameters:
 //   - api: gnark frontend API
-//   - c: ciphertext array (length 5)
+//   - c: ciphertext array (length 7)
 //   - encKey: shared DH key (G1Affine)
 //
 // Returns:
-//   - [5]frontend.Variable: decrypted values (pkOut, skIn, bid/ask, coins, energy)
-func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affine) [5]frontend.Variable {
+//   - [7]frontend.Variable: decrypted values (pkOut, skIn, bid/ask, coins, energy, role, quantity)
+func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affine) [7]frontend.Variable {
 	hasher, _ := mimc.NewMiMC(api)
 	hasher.Reset()
 	hasher.Write(encKey.X)
@@ -55,13 +55,23 @@ func DecZKReg(api frontend.API, c []frontend.Variable, encKey sw_bls12377.G1Affi
 	hasher.Write(mask3)
 	mask4 := hasher.Sum()
 
+	hasher.Reset()
+	hasher.Write(mask4)
+	mask5 := hasher.Sum()
+
+	hasher.Reset()
+	hasher.Write(mask5)
+	mask6 := hasher.Sum()
+
 	dec0 := api.Sub(c[0], mask0)
 	dec1 := api.Sub(c[1], mask1)
 	dec2 := api.Sub(c[2], mask2)
 	dec3 := api.Sub(c[3], mask3)
 	dec4 := api.Sub(c[4], mask4)
+	dec5 := api.Sub(c[5], mask5)
+	dec6 := api.Sub(c[6], mask6)
 
-	return [5]frontend.Variable{dec0, dec1, dec2, dec3, dec4}
+	return [7]frontend.Variable{dec0, dec1, dec2, dec3, dec4, dec5, dec6}
 }
 
 // PRF implements a pseudo-random function using MiMC hash in the circuit.
@@ -104,13 +114,10 @@ type CircuitTxFN struct {
 	CommissionPerUnit   frontend.Variable `gnark:",public"` // Commission per energy unit
 	MarginalBuyerPrice  frontend.Variable `gnark:",public"` // Marginal buyer price (for Euclidean division)
 	MarginalSellerPrice frontend.Variable `gnark:",public"` // Marginal seller price (for Euclidean division)
-	TotalEnergyTraded   frontend.Variable `gnark:",public"` // Total energy units traded
-	TotalCommission     frontend.Variable `gnark:",public"` // Total commission collected
 
-	// Per-participant trading data
-	ParticipantRoles []frontend.Variable `gnark:",public"` // 0=BUY, 1=SELL
-	TradedQuantities []frontend.Variable `gnark:",public"` // Energy quantity traded per participant
-	IsQualified      []frontend.Variable `gnark:",public"` // 1 if participant qualified for trade, 0 otherwise
+	// ParticipantRoles and TradedQuantities are now decrypted from registration data:
+	// - ParticipantRoles: DecVal[i][5] (0=BUY, 1=SELL)
+	// - TradedQuantities: DecVal[i][6] (Energy quantity traded per participant)
 
 	// ----- Input/Output Arrays for N coins -----
 	InCoin   []frontend.Variable `gnark:",public"`
@@ -154,8 +161,8 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 		N: n,
 
 		// Initialize auction parameter arrays
-		ParticipantRoles: make([]frontend.Variable, n),
-		TradedQuantities: make([]frontend.Variable, n),
+		// ParticipantRoles: make([]frontend.Variable, n), // Removed
+		// TradedQuantities: make([]frontend.Variable, n), // Removed
 		// Initialize arrays with proper sizes
 		InCoin:   make([]frontend.Variable, n),
 		InEnergy: make([]frontend.Variable, n),
@@ -186,8 +193,8 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 
 	// Initialize 2D arrays
 	for i := 0; i < n; i++ {
-		circuit.C[i] = make([]frontend.Variable, 5)
-		circuit.DecVal[i] = make([]frontend.Variable, 5)
+		circuit.C[i] = make([]frontend.Variable, 7)      // Changed from 5 to 7
+		circuit.DecVal[i] = make([]frontend.Variable, 7) // Changed from 5 to 7
 	}
 
 	return circuit
@@ -214,7 +221,9 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Step 4: Verify intersection boundary conditions
 	c.verifyIntersectionBoundary(api, marginalBuyerIndices, marginalSellerIndices)
 
-	// TODO: Step 5: Verify energy and coin conservation
+	// Step 5: Verify energy and coin conservation
+	c.verifyConservation(api)
+
 	// TODO: Step 6: Verify only qualified participants changed their notes
 
 	return nil
@@ -226,7 +235,7 @@ func (c *CircuitTxFN) verifyBasicCrypto(api frontend.API) error {
 	for coin := 0; coin < c.N; coin++ {
 		// --- Decrypt and verify the registration data ---
 		decVal := DecZKReg(api, c.C[coin][:], c.EncKey[coin])
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 7; i++ { // Changed from 5 to 7
 			api.AssertIsEqual(c.DecVal[coin][i], decVal[i])
 		}
 
@@ -274,8 +283,8 @@ func (c *CircuitTxFN) verifySorting(api frontend.API) {
 	// Verify sorting using simple consecutive checks
 	// Assumption: Auctioneer provides buyers first (descending), then sellers (ascending)
 	for i := 0; i < c.N-1; i++ {
-		currentRole := c.ParticipantRoles[i]
-		nextRole := c.ParticipantRoles[i+1]
+		currentRole := c.DecVal[i][5] // Use DecVal[i][5] for role
+		nextRole := c.DecVal[i+1][5]  // Use DecVal[i+1][5] for role
 
 		// If both consecutive participants are buyers (role=0): verify descending
 		bothBuyers := api.Mul(api.IsZero(currentRole), api.IsZero(nextRole))
@@ -308,7 +317,7 @@ func (c *CircuitTxFN) findMarginalParticipants(api frontend.API) ([]frontend.Var
 
 	for i := 0; i < c.N; i++ {
 		// Check if this participant is a buyer with marginal buyer price
-		isBuyer := api.IsZero(c.ParticipantRoles[i])
+		isBuyer := api.IsZero(c.DecVal[i][5]) // Use DecVal[i][5] for role
 		priceMatchesMarginalBuyer := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalBuyerPrice))
 		buyerMatch := api.Mul(isBuyer, priceMatchesMarginalBuyer)
 		marginalBuyerFound = api.Add(marginalBuyerFound, buyerMatch)
@@ -317,7 +326,7 @@ func (c *CircuitTxFN) findMarginalParticipants(api frontend.API) ([]frontend.Var
 		isMarginalBuyerAtIndex[i] = buyerMatch
 
 		// Check if this participant is a seller with marginal seller price
-		isSeller := api.IsZero(api.Sub(c.ParticipantRoles[i], 1))
+		isSeller := api.IsZero(api.Sub(c.DecVal[i][5], 1)) // Use DecVal[i][5] for role
 		priceMatchesMarginalSeller := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalSellerPrice))
 		sellerMatch := api.Mul(isSeller, priceMatchesMarginalSeller)
 		marginalSellerFound = api.Add(marginalSellerFound, sellerMatch)
@@ -335,7 +344,7 @@ func (c *CircuitTxFN) findMarginalParticipants(api frontend.API) ([]frontend.Var
 
 // verifyEuclideanDivision verifies the Euclidean division formula:
 // MarginalBuyerPrice + MarginalSellerPrice = 2 * ClearingPrice + CommissionPerUnit
-// Also verifies CommissionPerUnit is either 0 or 1 and TotalCommission calculation
+// Also verifies CommissionPerUnit is either 0 or 1
 func (c *CircuitTxFN) verifyEuclideanDivision(api frontend.API) {
 	// Verify: MarginalBuyerPrice + MarginalSellerPrice = 2 * ClearingPrice + CommissionPerUnit
 	marginalSum := api.Add(c.MarginalBuyerPrice, c.MarginalSellerPrice)
@@ -347,10 +356,6 @@ func (c *CircuitTxFN) verifyEuclideanDivision(api frontend.API) {
 	// CommissionPerUnit * (CommissionPerUnit - 1) = 0
 	commissionCheck := api.Mul(c.CommissionPerUnit, api.Sub(c.CommissionPerUnit, 1))
 	api.AssertIsEqual(commissionCheck, 0)
-
-	// Verify that TotalCommission = CommissionPerUnit * TotalEnergyTraded
-	expectedTotalCommission := api.Mul(c.CommissionPerUnit, c.TotalEnergyTraded)
-	api.AssertIsEqual(c.TotalCommission, expectedTotalCommission)
 }
 
 // verifyIntersectionBoundary verifies that the intersection between buyer and seller curves
@@ -368,7 +373,7 @@ func (c *CircuitTxFN) verifyBuyerIntersectionBoundary(api frontend.API, marginal
 		foundMarginalBuyer := marginalBuyerIndices[i]
 
 		// Check next buyer (forward boundary)
-		nextIsBuyer := api.IsZero(c.ParticipantRoles[i+1])
+		nextIsBuyer := api.IsZero(c.DecVal[i+1][5]) // Use DecVal[i+1][5] for role
 		checkCondition := api.Mul(foundMarginalBuyer, nextIsBuyer)
 		constraint := api.Mul(checkCondition, api.Add(c.DecVal[i+1][2], 1))
 		limit := api.Mul(checkCondition, c.MarginalSellerPrice)
@@ -383,7 +388,7 @@ func (c *CircuitTxFN) verifyBuyerIntersectionBoundary(api frontend.API, marginal
 		prevIsBuyer := frontend.Variable(0)
 		prevPrice := frontend.Variable(0)
 		if i > 0 {
-			prevIsBuyer = api.IsZero(c.ParticipantRoles[i-1])
+			prevIsBuyer = api.IsZero(c.DecVal[i-1][5]) // Use DecVal[i-1][5] for role
 			prevPrice = c.DecVal[i-1][2]
 		}
 
@@ -402,7 +407,7 @@ func (c *CircuitTxFN) verifySellerIntersectionBoundary(api frontend.API, margina
 		foundMarginalSeller := marginalSellerIndices[i]
 
 		// Check next seller (forward boundary)
-		nextIsSeller := api.IsZero(api.Sub(c.ParticipantRoles[i+1], 1))
+		nextIsSeller := api.IsZero(api.Sub(c.DecVal[i+1][5], 1)) // Use DecVal[i+1][5] for role
 		checkCondition := api.Mul(foundMarginalSeller, nextIsSeller)
 		constraint := api.Mul(checkCondition, api.Add(c.MarginalBuyerPrice, 1))
 		limit := api.Mul(checkCondition, c.DecVal[i+1][2])
@@ -417,7 +422,7 @@ func (c *CircuitTxFN) verifySellerIntersectionBoundary(api frontend.API, margina
 		prevIsSeller := frontend.Variable(0)
 		prevPrice := frontend.Variable(0)
 		if i > 0 {
-			prevIsSeller = api.IsZero(api.Sub(c.ParticipantRoles[i-1], 1))
+			prevIsSeller = api.IsZero(api.Sub(c.DecVal[i-1][5], 1)) // Use DecVal[i-1][5] for role
 			prevPrice = c.DecVal[i-1][2]
 		}
 
@@ -426,4 +431,45 @@ func (c *CircuitTxFN) verifySellerIntersectionBoundary(api frontend.API, margina
 		prevLimit := api.Mul(checkPrevCondition, c.ClearingPrice)
 		api.AssertIsLessOrEqual(prevConstraint, prevLimit) // prev_seller_ask <= clearing_price
 	}
+}
+
+// verifyConservation verifies energy and coin conservation:
+// - Energy: Sum(InputEnergy) = Sum(OutputEnergy) (energy is just transferred)
+// - Coins: Sum(InputCoins) = Sum(OutputCoins) + TotalCommission (auctioneer collects commission)
+func (c *CircuitTxFN) verifyConservation(api frontend.API) {
+	// Calculate total input energy and coins
+	totalInputEnergy := frontend.Variable(0)
+	totalInputCoins := frontend.Variable(0)
+
+	for i := 0; i < c.N; i++ {
+		totalInputEnergy = api.Add(totalInputEnergy, c.InEnergy[i])
+		totalInputCoins = api.Add(totalInputCoins, c.InCoin[i])
+	}
+
+	// Calculate total output energy and coins (participants only, not auctioneer)
+	totalOutputEnergy := frontend.Variable(0)
+	totalOutputCoins := frontend.Variable(0)
+
+	for i := 0; i < c.N; i++ {
+		totalOutputEnergy = api.Add(totalOutputEnergy, c.OutEnergy[i])
+		totalOutputCoins = api.Add(totalOutputCoins, c.OutCoin[i])
+	}
+
+	// Calculate total energy traded from TradedQuantities
+	totalEnergyTraded := frontend.Variable(0)
+	for i := 0; i < c.N; i++ {
+		totalEnergyTraded = api.Add(totalEnergyTraded, c.DecVal[i][6]) // Use DecVal[i][6] for traded quantity
+	}
+
+	// Calculate total commission
+	totalCommission := api.Mul(c.CommissionPerUnit, totalEnergyTraded)
+
+	// ENERGY CONSERVATION: Input energy = Output energy
+	// Energy is conserved - it's just transferred between participants
+	api.AssertIsEqual(totalInputEnergy, totalOutputEnergy)
+
+	// COIN CONSERVATION: Input coins = Output coins + Total commission
+	// The auctioneer collects commission, so participants get back less coins
+	expectedInputCoins := api.Add(totalOutputCoins, totalCommission)
+	api.AssertIsEqual(totalInputCoins, expectedInputCoins)
 }

@@ -20,7 +20,7 @@ import (
 
 // RegisterResult matches the exact output of Algorithm 2 (Register) in the paper.
 type RegisterResult struct {
-	CAux    [5]*big.Int  // C^Aux: Encrypted registration payload (pk^out, sk^in, b, Γ^in.coins, Γ^in.energy)
+	CAux    [7]*big.Int  // C^Aux: Encrypted registration payload (pk^out, sk^in, b, Γ^in.coins, Γ^in.energy, role, quantity)
 	TxIn    *zerocash.Tx // tx^in: Output of Algorithm 1 (Transaction)
 	InfoBid []byte       // info_bid: Public information about funds and bid (simplified, not used in circuit)
 	Proof   []byte       // π_reg: ZK proof for registration
@@ -36,10 +36,12 @@ type RegisterResult struct {
 	ECDHSharedSecret []byte             // ECDH shared secret for ECDH-AES (if applicable)
 }
 
-// Algorithm 2: Register(n^base, Γ^in, b_i) → (C^Aux, tx^in, info_bid, π_reg)
+// Algorithm 2: Register(n^base, Γ^in, b_i, role, quantity) → (C^Aux, tx^in, info_bid, π_reg)
 // auctioneerECDHPubKey: Auctioneer's ECDH public key for note encryption in CreateTx
 // participantECDHPrivKey: Participant's permanent ECDH private key for note encryption (Option 1)
-func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.Int,
+// role: Participant role (0=buyer, 1=seller)
+// quantity: Desired trading quantity
+func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.Int, role int, quantity int64,
 	pkTx groth16.ProvingKey, ccsTx constraint.ConstraintSystem,
 	pkReg groth16.ProvingKey, ccsReg constraint.ConstraintSystem,
 	skBytes []byte, auctioneerECDHPubKey *ecdh.PublicKey, participantECDHPrivKey *ecdh.PrivateKey) (*RegisterResult, error) {
@@ -90,9 +92,9 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	var sharedKey bls12377.G1Affine
 	sharedKey.ScalarMultiplication(participant.AuctioneerPub, rDH.BigInt(new(big.Int)))
 
-	// Step 7: Compute C^Aux = Enc(pk_T, (Γ^in, b, sk^in, pk^out)) using DH-OTP
+	// Step 7: Compute C^Aux = Enc(pk_T, (Γ^in, b, sk^in, pk^out, role, quantity)) using DH-OTP
 	skInBig := skIn.BigInt(new(big.Int))
-	cAux := EncryptRegistrationData(sharedKey, coins, energy, bid, skInBig, pkOut)
+	cAux := EncryptRegistrationData(sharedKey, coins, energy, bid, skInBig, pkOut, big.NewInt(int64(role)), big.NewInt(quantity))
 
 	// Step 8: Compute a commitment for the input note with pk^in for the circuit
 	inputCommitment := zerocash.Commitment(coins, energy, pkIn.Bytes(),
@@ -100,8 +102,8 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 
 	// Step 9: Compute Prove(x, w) → π_reg with the correct DH values
 	registrationProof, err := generateRegistrationProof(
-		txIn.NewNote, bid, coins, energy, skInBig, pkOut, cAux, inputCommitment,
-		sharedKey, participant.AuctioneerPub, rDH, pkReg, ccsReg)
+		txIn.NewNote, bid, coins, energy, skInBig, pkOut, role, quantity,
+		cAux, inputCommitment, sharedKey, participant.AuctioneerPub, rDH, pkReg, ccsReg)
 	if err != nil {
 		return nil, errors.New("registration proof generation failed: " + err.Error())
 	}
@@ -121,8 +123,8 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 }
 
 // EncryptRegistrationData implements DH-OTP encryption from Algorithm 2
-// C^Aux = Enc(pk_T, (Γ^in, b, sk^in, pk^out)) - field order matches EncZKReg circuit
-func EncryptRegistrationData(sharedKey bls12377.G1Affine, coins, energy, bid, skIn, pkOut *big.Int) [5]*big.Int {
+// C^Aux = Enc(pk_T, (Γ^in, b, sk^in, pk^out, role, quantity)) - expanded to 7 fields
+func EncryptRegistrationData(sharedKey bls12377.G1Affine, coins, energy, bid, skIn, pkOut, role, quantity *big.Int) [7]*big.Int {
 	h := mimcNative.NewMiMC()
 
 	// Derive base encryption key from DH shared secret
@@ -132,20 +134,20 @@ func EncryptRegistrationData(sharedKey bls12377.G1Affine, coins, energy, bid, sk
 	h.Write(encKeyY[:])
 	baseKey := h.Sum(nil)
 
-	// Generate mask chain for each field - matches EncZKReg in circuit
-	masks := make([][]byte, 5)
+	// Generate mask chain for each field - expanded to 7 fields
+	masks := make([][]byte, 7)
 	masks[0] = baseKey
-	for i := 1; i < 5; i++ {
+	for i := 1; i < 7; i++ {
 		h.Reset()
 		h.Write(masks[i-1])
 		masks[i] = h.Sum(nil)
 	}
 
-	// Encrypt fields in same order as EncZKReg: (pk^out, sk^in, b, coins, energy)
-	fields := []*big.Int{pkOut, skIn, bid, coins, energy}
-	var cAux [5]*big.Int
+	// Encrypt fields: (pk^out, sk^in, b, coins, energy, role, quantity)
+	fields := []*big.Int{pkOut, skIn, bid, coins, energy, role, quantity}
+	var cAux [7]*big.Int
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 7; i++ {
 		maskBig := new(big.Int).SetBytes(masks[i])
 		cAux[i] = new(big.Int).Add(fields[i], maskBig)
 	}
@@ -154,8 +156,8 @@ func EncryptRegistrationData(sharedKey bls12377.G1Affine, coins, energy, bid, sk
 }
 
 // generateRegistrationProof creates ZK proof matching CircuitTxRegister
-func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy, skIn, pkOut *big.Int,
-	cAux [5]*big.Int, inputCommitment []byte, sharedKey bls12377.G1Affine, auctioneerPub *bls12377.G1Affine,
+func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy, skIn, pkOut *big.Int, role int, quantity int64,
+	cAux [7]*big.Int, inputCommitment []byte, sharedKey bls12377.G1Affine, auctioneerPub *bls12377.G1Affine,
 	rDH bls12377_fr.Element, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
 
 	// Compute G (generator)
@@ -174,6 +176,8 @@ func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy,
 		GammaInEnergy: energy.String(),
 		GammaInCoins:  coins.String(),
 		Bid:           bid.String(),
+		Role:          big.NewInt(int64(role)).String(), // Participant role (0=buyer, 1=seller)
+		Quantity:      big.NewInt(quantity).String(),    // Desired trade quantity
 		G:             convertToG1Affine(g),
 		G_b:           convertToG1Affine(*auctioneerPub), // pk_T
 		G_r:           convertToG1Affine(gr),             // G^R
@@ -191,7 +195,7 @@ func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy,
 	}
 
 	// Set CAux values
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 7; i++ {
 		witness.CAux[i] = cAux[i].String()
 	}
 
@@ -231,7 +235,7 @@ func convertToG1Affine(p bls12377.G1Affine) sw_bls12377.G1Affine {
 }
 
 // DecryptRegistrationData decrypts registration data for testing purposes
-func DecryptRegistrationData(ciphertext [5]*big.Int, sharedKey bls12377.G1Affine) [5]*big.Int {
+func DecryptRegistrationData(ciphertext [7]*big.Int, sharedKey bls12377.G1Affine) [7]*big.Int {
 	h := mimcNative.NewMiMC()
 
 	// Derive base encryption key from DH shared secret (same as encryption)
@@ -242,17 +246,17 @@ func DecryptRegistrationData(ciphertext [5]*big.Int, sharedKey bls12377.G1Affine
 	baseKey := h.Sum(nil)
 
 	// Generate mask chain for each field (same as encryption)
-	masks := make([][]byte, 5)
+	masks := make([][]byte, 7)
 	masks[0] = baseKey
-	for i := 1; i < 5; i++ {
+	for i := 1; i < 7; i++ {
 		h.Reset()
 		h.Write(masks[i-1])
 		masks[i] = h.Sum(nil)
 	}
 
 	// Decrypt: subtract the masks
-	var decrypted [5]*big.Int
-	for i := 0; i < 5; i++ {
+	var decrypted [7]*big.Int
+	for i := 0; i < 7; i++ {
 		maskBig := new(big.Int).SetBytes(masks[i])
 		decrypted[i] = new(big.Int).Sub(ciphertext[i], maskBig)
 	}

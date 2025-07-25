@@ -292,7 +292,7 @@ type ProtocolState struct {
 	ParticipantPkIn  []*big.Int    // pk^in: Public keys for notes TO auctioneer
 	ParticipantSkOut []*big.Int    // sk^out: Secret keys for notes FROM auctioneer
 	ParticipantPkOut []*big.Int    // pk^out: Public keys for notes FROM auctioneer
-	ParticipantCAux  [][5]*big.Int // C^Aux: Encrypted registration data
+	ParticipantCAux  [][7]*big.Int // C^Aux: Encrypted registration data (7 fields: pk, sk, bid, coins, energy, role, quantity)
 }
 
 // CircuitKeys holds all the cryptographic circuit keys needed for ZK proofs
@@ -367,7 +367,7 @@ func main() {
 		ParticipantPkIn:    make([]*big.Int, config.NumParticipants),
 		ParticipantSkOut:   make([]*big.Int, config.NumParticipants),
 		ParticipantPkOut:   make([]*big.Int, config.NumParticipants),
-		ParticipantCAux:    make([][5]*big.Int, config.NumParticipants),
+		ParticipantCAux:    make([][7]*big.Int, config.NumParticipants),
 		RegistrationTxs:    make([]*zerocash.Tx, config.NumParticipants),
 		RegistrationProofs: make([][]byte, config.NumParticipants),
 		WithdrawalResults:  make([]bool, config.NumParticipants),
@@ -528,6 +528,8 @@ func executeRegistrationPhase(state *ProtocolState) error {
 			state.Participants[i],
 			state.BaseNotes[i],
 			state.OrderPrices[i],
+			int(state.Config.Roles[i]),              // Role: 0 for BUY, 1 for SELL
+			state.Config.Orders[i].Quantity.Int64(), // Quantity: desired trading amount
 			state.CircuitKeys.pkTx,
 			state.CircuitKeys.ccsTx,
 			state.CircuitKeys.pkReg,
@@ -906,7 +908,7 @@ func executeWithdrawalDemo(state *ProtocolState) {
 			Y: state.AuctioneerDHKp.Pk.Y.String(),
 		}
 
-		// Use the same ciphertext from registration
+		// Use the same ciphertext from registration (first 5 fields only for withdraw compatibility)
 		cipherAux := [5]*big.Int{
 			state.ParticipantCAux[participantID][0],
 			state.ParticipantCAux[participantID][1],
