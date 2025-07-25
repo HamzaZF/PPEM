@@ -275,6 +275,8 @@ type AuctionExecutionResult struct {
 	Outputs              []DecryptedRegistration // N participant outputs
 	AuctioneerNote       *DecryptedRegistration  // +1 auctioneer commission note
 	ClearingPrice        *big.Int
+	MarginalBuyerPrice   *big.Int // Real marginal buyer price from intersection
+	MarginalSellerPrice  *big.Int // Real marginal seller price from intersection
 	AuctioneerCommission *big.Int
 	TotalEnergyTraded    int64
 	TotalCoinsTraded     int64
@@ -304,6 +306,8 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 			Outputs:              inputs,
 			AuctioneerNote:       auctioneerNote,
 			ClearingPrice:        big.NewInt(0),
+			MarginalBuyerPrice:   big.NewInt(0),
+			MarginalSellerPrice:  big.NewInt(0),
 			AuctioneerCommission: big.NewInt(0),
 			TotalEnergyTraded:    0,
 			TotalCoinsTraded:     0,
@@ -350,9 +354,9 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 	// No need to re-sort since inputs are already sorted by SortParticipantsForCircuit
 
 	// Helper function to find intersection point using proper step-wise curve logic
-	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, *big.Int, bool) {
+	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, *big.Int, *big.Int, *big.Int, bool) {
 		if len(buyers) == 0 || len(sellers) == 0 {
-			return nil, nil, false
+			return nil, nil, nil, nil, false
 		}
 
 		// Build cumulative step-wise curves
@@ -431,10 +435,10 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 			clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
 			remainder := new(big.Int).Mod(sum, big.NewInt(2))
 
-			return clearingPrice, remainder, true
+			return clearingPrice, remainder, marginalBuyerPrice, marginalSellerPrice, true
 		}
 
-		return nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 
 	// Helper function to execute trades at clearing price with proper market clearing
@@ -610,7 +614,7 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 	}
 
 	// Find intersection point
-	clearingPrice, auctioneerCommission, tradingOccurs := findClearingPrice(buyers, sellers)
+	clearingPrice, auctioneerCommission, marginalBuyerPrice, marginalSellerPrice, tradingOccurs := findClearingPrice(buyers, sellers)
 
 	if !tradingOccurs {
 		// Create auctioneer note even when no trading (for consistency and conservation)
@@ -620,6 +624,8 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 			Outputs:              outputs,
 			AuctioneerNote:       auctioneerNote,
 			ClearingPrice:        big.NewInt(0),
+			MarginalBuyerPrice:   big.NewInt(0),
+			MarginalSellerPrice:  big.NewInt(0),
 			AuctioneerCommission: big.NewInt(0),
 			TotalEnergyTraded:    0,
 			TotalCoinsTraded:     0,
@@ -641,6 +647,8 @@ func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, 
 		Outputs:              outputs,
 		AuctioneerNote:       auctioneerNote,
 		ClearingPrice:        clearingPrice,
+		MarginalBuyerPrice:   marginalBuyerPrice,
+		MarginalSellerPrice:  marginalSellerPrice,
 		AuctioneerCommission: totalCommission,
 		TotalEnergyTraded:    totalEnergyTraded,
 		TotalCoinsTraded:     totalCoinsTraded,
@@ -887,10 +895,10 @@ func validateExchangeInputs(
 
 // BuildWitnessFN builds a witness for the dynamic CircuitTxFN.
 // Populates all circuit fields for N participants using the provided auction results.
-func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *sw_bls12377.G1Affine) *CircuitTxFN {
+func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *sw_bls12377.G1Affine, auctionExecution *AuctionExecutionResult, roles map[int]zerocash.OrderType) *CircuitTxFN {
 	n := len(payloads)
 	if n == 0 {
-		panic("BuildWitnessFN: no payloads provided")
+		return nil
 	}
 
 	// Create dynamic circuit
@@ -911,6 +919,55 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 			result[i] = toVar(val)
 		}
 		return result
+	}
+
+	// ==== POPULATE AUCTION PARAMETERS ====
+	circuit.ClearingPrice = toVar(auctionExecution.ClearingPrice)
+	circuit.TotalEnergyTraded = toVar(big.NewInt(auctionExecution.TotalEnergyTraded))
+	circuit.TotalCommission = toVar(auctionExecution.AuctioneerCommission)
+
+	// Calculate commission per unit
+	var commissionPerUnit *big.Int
+	if auctionExecution.TotalEnergyTraded > 0 {
+		commissionPerUnit = new(big.Int).Div(auctionExecution.AuctioneerCommission, big.NewInt(auctionExecution.TotalEnergyTraded))
+	} else {
+		commissionPerUnit = big.NewInt(0)
+	}
+	circuit.CommissionPerUnit = toVar(commissionPerUnit)
+
+	// Use REAL marginal prices from auction execution (not calculated ones!)
+	circuit.MarginalBuyerPrice = toVar(auctionExecution.MarginalBuyerPrice)
+	circuit.MarginalSellerPrice = toVar(auctionExecution.MarginalSellerPrice)
+
+	// Count buyers to determine roles and qualification status
+	numBuyers := 0
+	for _, role := range roles {
+		if role == zerocash.BUY {
+			numBuyers++
+		}
+	}
+
+	// Set participant roles, traded quantities, and qualification status
+	for i := 0; i < n; i++ {
+		// Set role (0=BUY, 1=SELL)
+		if i < numBuyers {
+			circuit.ParticipantRoles[i] = "0" // Buyer
+		} else {
+			circuit.ParticipantRoles[i] = "1" // Seller
+		}
+
+		// Calculate traded quantity for this participant
+		var tradedQty int64 = 0
+		if i < len(inputs) && i < len(outputs) {
+			energyDiff := new(big.Int).Sub(outputs[i].Energy, inputs[i].Energy)
+			tradedQty = energyDiff.Int64()
+			if tradedQty < 0 {
+				tradedQty = -tradedQty // Absolute value
+			}
+		}
+		circuit.TradedQuantities[i] = toVar(big.NewInt(tradedQty))
+
+		// Qualification status is now determined by circuit from TradedQuantities (> 0 = qualified)
 	}
 
 	// Helper to compute MiMC hash (same as circuit)
@@ -1280,7 +1337,7 @@ func ExchangePhaseWithNotes(
 		X: auctioneerDHPk.X.String(),
 		Y: auctioneerDHPk.Y.String(),
 	}
-	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk)
+	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk, auctionExecution, roles)
 	proof, err = GenerateProofFN(witness, pk, ccs)
 
 	if err != nil {

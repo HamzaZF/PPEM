@@ -99,6 +99,19 @@ type CircuitTxFN struct {
 	// Number of participants this circuit supports (must be even)
 	N int
 
+	// ----- Auction Parameters (Public) -----
+	ClearingPrice       frontend.Variable `gnark:",public"` // Auction clearing price
+	CommissionPerUnit   frontend.Variable `gnark:",public"` // Commission per energy unit
+	MarginalBuyerPrice  frontend.Variable `gnark:",public"` // Marginal buyer price (for Euclidean division)
+	MarginalSellerPrice frontend.Variable `gnark:",public"` // Marginal seller price (for Euclidean division)
+	TotalEnergyTraded   frontend.Variable `gnark:",public"` // Total energy units traded
+	TotalCommission     frontend.Variable `gnark:",public"` // Total commission collected
+
+	// Per-participant trading data
+	ParticipantRoles []frontend.Variable `gnark:",public"` // 0=BUY, 1=SELL
+	TradedQuantities []frontend.Variable `gnark:",public"` // Energy quantity traded per participant
+	IsQualified      []frontend.Variable `gnark:",public"` // 1 if participant qualified for trade, 0 otherwise
+
 	// ----- Input/Output Arrays for N coins -----
 	InCoin   []frontend.Variable `gnark:",public"`
 	InEnergy []frontend.Variable `gnark:",public"`
@@ -134,11 +147,15 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 	if n <= 0 {
 		panic("CircuitTxFN: N must be positive")
 	}
-	// Removed N%2 constraint - circuit now supports flexible buyer/seller ratios
+
 	// Auction logic runs outside the circuit
 
 	circuit := &CircuitTxFN{
 		N: n,
+
+		// Initialize auction parameter arrays
+		ParticipantRoles: make([]frontend.Variable, n),
+		TradedQuantities: make([]frontend.Variable, n),
 		// Initialize arrays with proper sizes
 		InCoin:   make([]frontend.Variable, n),
 		InEnergy: make([]frontend.Variable, n),
@@ -230,85 +247,40 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 		api.AssertIsEqual(c.InPk[coin], pk)
 	}
 
-	// // --- Verify auction sorting constraints ---
-	// // First half (0 to N/2-1) are buyers: DecVal[i][2] should be in descending order (highest bid first)
-	// // Second half (N/2 to N-1) are sellers: DecVal[i][2] should be in ascending order (lowest ask first)
-	// halfN := c.N / 2
+	// ==== STEP 2: EUCLIDEAN DIVISION VERIFICATION ====
+	// Verify that: MarginalBuyerPrice + MarginalSellerPrice = 2 * ClearingPrice + CommissionPerUnit
+	// This ensures the clearing price was computed correctly using Euclidean division
+	marginalSum := api.Add(c.MarginalBuyerPrice, c.MarginalSellerPrice)
+	clearingTimesTwo := api.Mul(c.ClearingPrice, 2)
+	expectedSum := api.Add(clearingTimesTwo, c.CommissionPerUnit)
+	api.AssertIsEqual(marginalSum, expectedSum)
 
-	// // Verify buyers are sorted in descending order (highest bid first)
-	// for i := 0; i < halfN-1; i++ {
-	// 	// For buyers: DecVal[i][2] >= DecVal[i+1][2]
-	// 	// Use api.AssertIsLessOrEqual to verify DecVal[i+1][2] <= DecVal[i][2]
-	// 	api.AssertIsLessOrEqual(c.DecVal[i+1][2], c.DecVal[i][2])
-	// }
+	// Verify that TotalCommission = CommissionPerUnit * TotalEnergyTraded
+	expectedTotalCommission := api.Mul(c.CommissionPerUnit, c.TotalEnergyTraded)
+	api.AssertIsEqual(c.TotalCommission, expectedTotalCommission)
 
-	// // Verify sellers are sorted in ascending order (lowest ask first)
-	// for i := halfN; i < c.N-1; i++ {
-	// 	// For sellers: DecVal[i][2] <= DecVal[i+1][2]
-	// 	api.AssertIsLessOrEqual(c.DecVal[i][2], c.DecVal[i+1][2])
-	// }
+	// STEP 3a: Verify sorting using simple consecutive checks
+	// Assumption: Auctioneer provides buyers first (descending), then sellers (ascending)
+	for i := 0; i < c.N-1; i++ {
+		currentRole := c.ParticipantRoles[i]
+		nextRole := c.ParticipantRoles[i+1]
 
-	// // --- Implement auction trading logic ---
-	// // Define clearing price as the bid of buyer number N/4
-	// clearingPrice := c.DecVal[halfN/2][2]
+		// If both consecutive participants are buyers (role=0): verify descending
+		bothBuyers := api.Mul(api.IsZero(currentRole), api.IsZero(nextRole))
+		buyerConstraint := api.Mul(bothBuyers, c.DecVal[i+1][2]) // next_price * flag
+		buyerLimit := api.Mul(bothBuyers, c.DecVal[i][2])        // current_price * flag
+		api.AssertIsLessOrEqual(buyerConstraint, buyerLimit)     // next <= current when both buyers
 
-	// // Process trading for all participants
-	// for i := 0; i < c.N; i++ {
-	// 	if i < halfN {
-	// 		// This is a buyer (index 0 to N/2-1)
-	// 		// Buyer qualifies if their bid >= clearing price
+		// If both consecutive participants are sellers (role=1): verify ascending
+		bothSellers := api.Mul(api.IsZero(api.Sub(currentRole, 1)), api.IsZero(api.Sub(nextRole, 1)))
+		sellerConstraint := api.Mul(bothSellers, c.DecVal[i][2]) // current_price * flag
+		sellerLimit := api.Mul(bothSellers, c.DecVal[i+1][2])    // next_price * flag
+		api.AssertIsLessOrEqual(sellerConstraint, sellerLimit)   // current <= next when both sellers
 
-	// 		// Calculate what the output should be
-	// 		tradingCost := api.Mul(clearingPrice, TRADING_VOLUME)
-	// 		coinAfterTrade := api.Sub(c.InCoin[i], tradingCost)
-	// 		energyAfterTrade := api.Add(c.InEnergy[i], TRADING_VOLUME)
-
-	// 		// // Simplified qualification: bid >= clearing price
-	// 		// // If (bid - clearing) >= 0, then qualified = 1, else qualified = 0
-	// 		// bidDiff := api.Sub(c.DecVal[i][2], clearingPrice)
-	// 		// //qualified := api.IsZero(api.IsZero(bidDiff)) // This gives 1 if bidDiff >= 0
-
-	// 		// qualified := api.IsZero(api.Sub(0, api.IsZero(bidDiff)))
-
-	// 		// Buyer qualifies if bid >= clearing price
-	// 		// api.Cmp(bid, clearingPrice) returns 1 if bid > clearing, 0 if equal, -1 if bid < clearing
-	// 		// We want 1 if qualified (bid >= clearing), 0 otherwise
-	// 		cmpResult := api.Cmp(c.DecVal[i][2], clearingPrice)
-
-	// 		qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
-
-	// 		// Compute expected outputs based on qualification
-	// 		expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
-	// 		expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
-
-	// 		// Assert that the claimed outputs match our computation
-	// 		api.AssertIsEqual(c.OutCoin[i], expectedCoin)
-	// 		api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
-	// 	} else {
-	// 		// This is a seller (index N/2 to N-1)
-	// 		// Seller qualifies if their ask <= clearing price
-
-	// 		// Calculate what the output should be
-	// 		tradingRevenue := api.Mul(clearingPrice, TRADING_VOLUME)
-	// 		coinAfterTrade := api.Add(c.InCoin[i], tradingRevenue)
-	// 		energyAfterTrade := api.Sub(c.InEnergy[i], TRADING_VOLUME)
-
-	// 		// Seller qualifies if ask <= clearing price
-	// 		// api.Cmp(clearingPrice, ask) returns 1 if clearing > ask, 0 if equal, -1 if clearing < ask
-	// 		// We want 1 if qualified (ask <= clearing), 0 otherwise
-	// 		cmpResult := api.Cmp(clearingPrice, c.DecVal[i][2])
-	// 		qualified := api.Select(api.IsZero(cmpResult), 1, api.IsZero(api.Sub(1, cmpResult)))
-	// 		//qualified := api.IsZero(api.Sub(1, cmpResult)) // 1 if cmpResult >= 0, 0 otherwise
-
-	// 		// Compute expected outputs based on qualification
-	// 		expectedCoin := api.Add(c.InCoin[i], api.Mul(qualified, api.Sub(coinAfterTrade, c.InCoin[i])))
-	// 		expectedEnergy := api.Add(c.InEnergy[i], api.Mul(qualified, api.Sub(energyAfterTrade, c.InEnergy[i])))
-
-	// 		// Assert that the claimed outputs match our computation
-	// 		api.AssertIsEqual(c.OutCoin[i], expectedCoin)
-	// 		api.AssertIsEqual(c.OutEnergy[i], expectedEnergy)
-	// 	}
-	// }
+		// Ensure buyers come before sellers (no seller followed by buyer)
+		invalidOrder := api.Mul(api.IsZero(api.Sub(currentRole, 1)), api.IsZero(nextRole))
+		api.AssertIsEqual(invalidOrder, 0) // seller->buyer transition not allowed
+	}
 
 	return nil
 }
