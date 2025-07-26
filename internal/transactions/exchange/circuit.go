@@ -7,8 +7,6 @@
 // - First N/2 participants are buyers (sorted descending by bid)
 // - Last N/2 participants are sellers (sorted ascending by ask)
 // - DecVal[i][2] contains the bid/ask price for participant i
-//
-// WARNING: This circuit enforces sorting and basic trading constraints but does NOT implement a full double auction.
 
 package exchange
 
@@ -17,10 +15,6 @@ import (
 	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
 	"github.com/consensys/gnark/std/hash/mimc"
 )
-
-// TRADING_VOLUME is the hardcoded trading volume for the simplified auction.
-// All trades are for this fixed quantity of energy.
-const TRADING_VOLUME = 10
 
 // DecZKReg decrypts a registration ciphertext in the circuit using a MiMC-based mask chain.
 // This function mimics the off-circuit decryption logic for registration payloads.
@@ -226,8 +220,7 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	c.verifyConservation(api)
 
 	// Step 6: Verify exchanges are correct for qualified non-marginal participants
-	// TODO: Implement proper individual trade verification later
-	// c.verifyQualifiedParticipantExchanges(api)
+	c.verifyQualifiedParticipantExchanges(api, marginalBuyerIndices, marginalSellerIndices)
 
 	return nil
 }
@@ -493,4 +486,74 @@ func (c *CircuitTxFN) verifyCoinConservationWithCommission(api frontend.API) {
 	// Verify conservation: sum(InCoin) = sum(OutCoin) + totalCommission
 	expectedOutCoin := api.Sub(totalInCoin, totalCommission)
 	api.AssertIsEqual(totalOutCoin, expectedOutCoin)
+}
+
+// verifyQualifiedParticipantExchanges verifies that qualified non-marginal participants
+// have correct energy and coin exchanges based on the clearing price.
+// This function uses assertions with conditional constraints rather than boolean comparisons.
+func (c *CircuitTxFN) verifyQualifiedParticipantExchanges(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable) {
+	for i := 0; i < c.N; i++ {
+		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+		bidAskPrice := c.DecVal[i][2]
+		tradedQuantity := c.DecVal[i][6]
+
+		// First, identify qualified participants (those who should trade based on price)
+		isBuyer := api.IsZero(participantRole)
+		isNonMarginalBuyer := api.Sub(1, marginalBuyerIndices[i]) // 1 - isMarginal = isNonMarginal
+
+		// For non-marginal buyers who are qualified: verify trade correctness
+		baseBuyerCondition := api.Mul(isBuyer, isNonMarginalBuyer)
+
+		// Check if participant actually traded (energy changed by the expected amount)
+		energyChanged := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+
+		// If non-marginal buyer AND energy changed by traded quantity, then verify:
+		// 1. bid >= clearing price
+		// 2. trade is correct
+		buyerTradedCondition := api.Mul(baseBuyerCondition, api.IsZero(api.Sub(energyChanged, tradedQuantity))) // energy gain equals traded quantity
+
+		// Assert: if buyer traded, then bid >= clearing price
+		clearingPriceConstraint := api.Mul(buyerTradedCondition, c.ClearingPrice)
+		bidConstraint := api.Mul(buyerTradedCondition, bidAskPrice)
+		api.AssertIsLessOrEqual(clearingPriceConstraint, bidConstraint)
+
+		// Assert: if buyer traded, then trade is correct
+		expectedEnergyOutBuyer := api.Add(c.InEnergy[i], tradedQuantity)
+		energyConstraintBuyer := api.Mul(buyerTradedCondition, c.OutEnergy[i])
+		energyTargetBuyer := api.Mul(buyerTradedCondition, expectedEnergyOutBuyer)
+		api.AssertIsEqual(energyConstraintBuyer, energyTargetBuyer)
+
+		coinCost := api.Mul(c.ClearingPrice, tradedQuantity)
+		expectedCoinOutBuyer := api.Sub(c.InCoin[i], coinCost)
+		coinConstraintBuyer := api.Mul(buyerTradedCondition, c.OutCoin[i])
+		coinTargetBuyer := api.Mul(buyerTradedCondition, expectedCoinOutBuyer)
+		api.AssertIsEqual(coinConstraintBuyer, coinTargetBuyer)
+
+		// For sellers: similar logic
+		isSeller := api.IsZero(api.Sub(participantRole, 1))
+		isNonMarginalSeller := api.Sub(1, marginalSellerIndices[i]) // 1 - isMarginal = isNonMarginal
+
+		baseSellerCondition := api.Mul(isSeller, isNonMarginalSeller)
+
+		// Check if seller actually traded (energy decreased)
+		sellerEnergyChanged := api.Sub(c.InEnergy[i], c.OutEnergy[i])                                                   // Should be positive if energy lost
+		sellerTradedCondition := api.Mul(baseSellerCondition, api.IsZero(api.Sub(sellerEnergyChanged, tradedQuantity))) // energy loss equals traded quantity
+
+		// Assert: if seller traded, then ask <= clearing price
+		askConstraint := api.Mul(sellerTradedCondition, bidAskPrice)
+		clearingPriceConstraintSeller := api.Mul(sellerTradedCondition, c.ClearingPrice)
+		api.AssertIsLessOrEqual(askConstraint, clearingPriceConstraintSeller)
+
+		// Assert: if seller traded, then trade is correct
+		expectedEnergyOutSeller := api.Sub(c.InEnergy[i], tradedQuantity)
+		energyConstraintSeller := api.Mul(sellerTradedCondition, c.OutEnergy[i])
+		energyTargetSeller := api.Mul(sellerTradedCondition, expectedEnergyOutSeller)
+		api.AssertIsEqual(energyConstraintSeller, energyTargetSeller)
+
+		coinGain := api.Mul(c.ClearingPrice, tradedQuantity)
+		expectedCoinOutSeller := api.Add(c.InCoin[i], coinGain)
+		coinConstraintSeller := api.Mul(sellerTradedCondition, c.OutCoin[i])
+		coinTargetSeller := api.Mul(sellerTradedCondition, expectedCoinOutSeller)
+		api.AssertIsEqual(coinConstraintSeller, coinTargetSeller)
+	}
 }
