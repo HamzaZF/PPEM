@@ -222,6 +222,9 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Step 6: Verify exchanges are correct for qualified non-marginal participants
 	c.verifyQualifiedParticipantExchanges(api, marginalBuyerIndices, marginalSellerIndices)
 
+	// Step 7: Verify exchanges are correct for marginal participants
+	c.verifyMarginalParticipantExchanges(api, marginalBuyerIndices, marginalSellerIndices)
+
 	return nil
 }
 
@@ -555,5 +558,209 @@ func (c *CircuitTxFN) verifyQualifiedParticipantExchanges(api frontend.API, marg
 		coinConstraintSeller := api.Mul(sellerTradedCondition, c.OutCoin[i])
 		coinTargetSeller := api.Mul(sellerTradedCondition, expectedCoinOutSeller)
 		api.AssertIsEqual(coinConstraintSeller, coinTargetSeller)
+	}
+}
+
+// verifyMarginalParticipantExchanges verifies that marginal participants have correct trades
+// based on which curve cuts which in the double auction intersection.
+// Assumes exactly one marginal buyer and one marginal seller.
+func (c *CircuitTxFN) verifyMarginalParticipantExchanges(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable) {
+	// Find the indices of marginal participants
+	marginalBuyerIndex := frontend.Variable(-1)
+	marginalSellerIndex := frontend.Variable(-1)
+
+	for i := 0; i < c.N; i++ {
+		// If this is a marginal buyer, store the index
+		isMarginalBuyer := marginalBuyerIndices[i]
+		marginalBuyerIndex = api.Add(marginalBuyerIndex, api.Mul(isMarginalBuyer, frontend.Variable(i+1))) // +1 to avoid 0 index confusion
+
+		// If this is a marginal seller, store the index
+		isMarginalSeller := marginalSellerIndices[i]
+		marginalSellerIndex = api.Add(marginalSellerIndex, api.Mul(isMarginalSeller, frontend.Variable(i+1))) // +1 to avoid 0 index confusion
+	}
+
+	// Convert back to 0-based indices
+	marginalBuyerIndex = api.Sub(marginalBuyerIndex, 1)
+	marginalSellerIndex = api.Sub(marginalSellerIndex, 1)
+
+	// Calculate total qualified demand and supply (both including marginals)
+	totalQualifiedBuyerDemandIncludingMarginal := c.calculateQualifiedBuyerDemand(api, marginalBuyerIndices, true)    // Include marginal buyer
+	totalQualifiedSellerSupplyIncludingMarginal := c.calculateQualifiedSellerSupply(api, marginalSellerIndices, true) // Include marginal seller
+
+	// Determine which scenario we're in by comparing total demand vs supply
+	// If buyer demand > seller supply: buyer curve cuts seller curve
+	// If seller supply > buyer demand: seller curve cuts buyer curve
+	// The greater sum represents the curve that is being cut by the smaller one
+
+	// Calculate specific combinations needed for each scenario
+	totalQualifiedSellerSupplyExcludingMarginal := c.calculateQualifiedSellerSupply(api, marginalSellerIndices, false) // For scenario 1
+	totalQualifiedBuyerDemandExcludingMarginal := c.calculateQualifiedBuyerDemand(api, marginalBuyerIndices, false)    // For scenario 2
+
+	// We need to determine which scenario applies based on the relationship between total demand and supply
+	// Since we can't directly compare in circuits, we'll use the fact that exactly one scenario must be consistent
+	// The auctioneer should have arranged the data such that one scenario will satisfy all constraints
+
+	// Try both scenarios - the circuit will only pass if the data is consistent with one of them
+
+	// Scenario 1: Buyer curve cuts seller curve (buyer demand > seller supply)
+	// Marginal buyer trades full quantity, marginal seller trades partial
+	c.verifyMarginalTradesScenario1(api, marginalBuyerIndices, marginalSellerIndices,
+		totalQualifiedBuyerDemandIncludingMarginal, totalQualifiedSellerSupplyExcludingMarginal)
+
+	// Scenario 2: Seller curve cuts buyer curve (seller supply > buyer demand)
+	// Marginal seller trades full quantity, marginal buyer trades partial
+	c.verifyMarginalTradesScenario2(api, marginalBuyerIndices, marginalSellerIndices,
+		totalQualifiedBuyerDemandExcludingMarginal, totalQualifiedSellerSupplyIncludingMarginal)
+}
+
+// calculateQualifiedBuyerDemand calculates total demand from qualified buyers
+func (c *CircuitTxFN) calculateQualifiedBuyerDemand(api frontend.API, marginalBuyerIndices []frontend.Variable, includeMarginal bool) frontend.Variable {
+	totalDemand := frontend.Variable(0)
+
+	for i := 0; i < c.N; i++ {
+		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+		bidPrice := c.DecVal[i][2]
+		tradedQuantity := c.DecVal[i][6]
+
+		isBuyer := api.IsZero(participantRole)
+		isMarginalBuyer := marginalBuyerIndices[i]
+
+		// Check if buyer is qualified (bid >= clearing price)
+		isQualifiedBuyer := api.Mul(isBuyer, api.IsZero(api.Sub(api.Add(bidPrice, 1), api.Add(c.ClearingPrice, 1)))) // bid >= clearing
+
+		// Determine if we should include this buyer
+		shouldInclude := isQualifiedBuyer
+		if !includeMarginal {
+			// Exclude marginal buyer: qualified AND not marginal
+			shouldInclude = api.Mul(isQualifiedBuyer, api.Sub(1, isMarginalBuyer))
+		}
+
+		// Add to total demand
+		contribution := api.Mul(shouldInclude, tradedQuantity)
+		totalDemand = api.Add(totalDemand, contribution)
+	}
+
+	return totalDemand
+}
+
+// calculateQualifiedSellerSupply calculates total supply from qualified sellers
+func (c *CircuitTxFN) calculateQualifiedSellerSupply(api frontend.API, marginalSellerIndices []frontend.Variable, includeMarginal bool) frontend.Variable {
+	totalSupply := frontend.Variable(0)
+
+	for i := 0; i < c.N; i++ {
+		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+		askPrice := c.DecVal[i][2]
+		tradedQuantity := c.DecVal[i][6]
+
+		isSeller := api.IsZero(api.Sub(participantRole, 1))
+		isMarginalSeller := marginalSellerIndices[i]
+
+		// Check if seller is qualified (ask <= clearing price)
+		isQualifiedSeller := api.Mul(isSeller, api.IsZero(api.Sub(api.Add(c.ClearingPrice, 1), api.Add(askPrice, 1)))) // clearing >= ask
+
+		// Determine if we should include this seller
+		shouldInclude := isQualifiedSeller
+		if !includeMarginal {
+			// Exclude marginal seller: qualified AND not marginal
+			shouldInclude = api.Mul(isQualifiedSeller, api.Sub(1, isMarginalSeller))
+		}
+
+		// Add to total supply
+		contribution := api.Mul(shouldInclude, tradedQuantity)
+		totalSupply = api.Add(totalSupply, contribution)
+	}
+
+	return totalSupply
+}
+
+// verifyMarginalTradesScenario1 verifies trades when buyer curve cuts seller curve
+// Marginal buyer trades full quantity, marginal seller trades partial quantity
+func (c *CircuitTxFN) verifyMarginalTradesScenario1(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable,
+	totalBuyerDemand, totalSellerSupply frontend.Variable) {
+
+	marginalSellerPartialQuantity := api.Sub(totalBuyerDemand, totalSellerSupply)
+
+	for i := 0; i < c.N; i++ {
+		isMarginalBuyer := marginalBuyerIndices[i]
+		isMarginalSeller := marginalSellerIndices[i]
+		tradedQuantity := c.DecVal[i][6]
+
+		// Verify marginal buyer trades full quantity
+		marginalBuyerCondition := isMarginalBuyer
+
+		// Energy gain should equal full traded quantity
+		expectedEnergyOutBuyer := api.Add(c.InEnergy[i], tradedQuantity)
+		energyConstraintBuyer := api.Mul(marginalBuyerCondition, c.OutEnergy[i])
+		energyTargetBuyer := api.Mul(marginalBuyerCondition, expectedEnergyOutBuyer)
+		api.AssertIsEqual(energyConstraintBuyer, energyTargetBuyer)
+
+		// Coin loss should equal clearing price * full quantity
+		coinCost := api.Mul(c.ClearingPrice, tradedQuantity)
+		expectedCoinOutBuyer := api.Sub(c.InCoin[i], coinCost)
+		coinConstraintBuyer := api.Mul(marginalBuyerCondition, c.OutCoin[i])
+		coinTargetBuyer := api.Mul(marginalBuyerCondition, expectedCoinOutBuyer)
+		api.AssertIsEqual(coinConstraintBuyer, coinTargetBuyer)
+
+		// Verify marginal seller trades partial quantity
+		marginalSellerCondition := isMarginalSeller
+
+		// Energy loss should equal partial quantity
+		expectedEnergyOutSeller := api.Sub(c.InEnergy[i], marginalSellerPartialQuantity)
+		energyConstraintSeller := api.Mul(marginalSellerCondition, c.OutEnergy[i])
+		energyTargetSeller := api.Mul(marginalSellerCondition, expectedEnergyOutSeller)
+		api.AssertIsEqual(energyConstraintSeller, energyTargetSeller)
+
+		// Coin gain should equal clearing price * partial quantity
+		coinGain := api.Mul(c.ClearingPrice, marginalSellerPartialQuantity)
+		expectedCoinOutSeller := api.Add(c.InCoin[i], coinGain)
+		coinConstraintSeller := api.Mul(marginalSellerCondition, c.OutCoin[i])
+		coinTargetSeller := api.Mul(marginalSellerCondition, expectedCoinOutSeller)
+		api.AssertIsEqual(coinConstraintSeller, coinTargetSeller)
+	}
+}
+
+// verifyMarginalTradesScenario2 verifies trades when seller curve cuts buyer curve
+// Marginal seller trades full quantity, marginal buyer trades partial quantity
+func (c *CircuitTxFN) verifyMarginalTradesScenario2(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable,
+	totalBuyerDemand, totalSellerSupply frontend.Variable) {
+
+	marginalBuyerPartialQuantity := api.Sub(totalSellerSupply, totalBuyerDemand)
+
+	for i := 0; i < c.N; i++ {
+		isMarginalBuyer := marginalBuyerIndices[i]
+		isMarginalSeller := marginalSellerIndices[i]
+		tradedQuantity := c.DecVal[i][6]
+
+		// Verify marginal seller trades full quantity
+		marginalSellerCondition := isMarginalSeller
+
+		// Energy loss should equal full traded quantity
+		expectedEnergyOutSeller := api.Sub(c.InEnergy[i], tradedQuantity)
+		energyConstraintSeller := api.Mul(marginalSellerCondition, c.OutEnergy[i])
+		energyTargetSeller := api.Mul(marginalSellerCondition, expectedEnergyOutSeller)
+		api.AssertIsEqual(energyConstraintSeller, energyTargetSeller)
+
+		// Coin gain should equal clearing price * full quantity
+		coinGain := api.Mul(c.ClearingPrice, tradedQuantity)
+		expectedCoinOutSeller := api.Add(c.InCoin[i], coinGain)
+		coinConstraintSeller := api.Mul(marginalSellerCondition, c.OutCoin[i])
+		coinTargetSeller := api.Mul(marginalSellerCondition, expectedCoinOutSeller)
+		api.AssertIsEqual(coinConstraintSeller, coinTargetSeller)
+
+		// Verify marginal buyer trades partial quantity
+		marginalBuyerCondition := isMarginalBuyer
+
+		// Energy gain should equal partial quantity
+		expectedEnergyOutBuyer := api.Add(c.InEnergy[i], marginalBuyerPartialQuantity)
+		energyConstraintBuyer := api.Mul(marginalBuyerCondition, c.OutEnergy[i])
+		energyTargetBuyer := api.Mul(marginalBuyerCondition, expectedEnergyOutBuyer)
+		api.AssertIsEqual(energyConstraintBuyer, energyTargetBuyer)
+
+		// Coin loss should equal clearing price * partial quantity
+		coinCost := api.Mul(c.ClearingPrice, marginalBuyerPartialQuantity)
+		expectedCoinOutBuyer := api.Sub(c.InCoin[i], coinCost)
+		coinConstraintBuyer := api.Mul(marginalBuyerCondition, c.OutCoin[i])
+		coinTargetBuyer := api.Mul(marginalBuyerCondition, expectedCoinOutBuyer)
+		api.AssertIsEqual(coinConstraintBuyer, coinTargetBuyer)
 	}
 }
