@@ -84,6 +84,7 @@ func createDefaultMarketConfig() MarketConfig {
 }
 
 // createMarketConfigForN creates a realistic market configuration for any number of participants
+// that GUARANTEES "buyer curve cuts seller curve" scenario for circuit verification.
 // buyerRatio specifies what fraction should be buyers (0.0 to 1.0). Default 0.5 means balanced market.
 func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	if n <= 0 {
@@ -116,9 +117,19 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	fmt.Printf("Market composition: %d buyers, %d sellers (%.1f%% buyers)\n",
 		numBuyers, numSellers, buyerRatio*100)
 
+	// *** CIRCUIT ASSUMPTION ENFORCEMENT ***
+	// We need to guarantee: Total Buyer Demand > Total Seller Supply
+	// Strategy: Buyers get larger quantities on average + overlapping price ranges
+
 	// Create a mixed pattern of buyers and sellers
 	buyerCount := 0
 	sellerCount := 0
+
+	// Calculate base quantities to ensure buyer demand > seller supply
+	// Give buyers 20% more total demand than sellers can supply
+	totalBuyerDemand := int64(0)
+	totalSellerSupply := int64(0)
+	baseQuantity := int64(10)
 
 	for i := 0; i < n; i++ {
 		var role zerocash.OrderType
@@ -149,22 +160,36 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		roles[i] = role
 
 		// Initial balances: vary based on participant index
-		initialCoins[i] = int64(1000 + i*100)
-		initialEnergy[i] = 100 // Fixed energy for all participants
+		initialCoins[i] = int64(2000 + i*100) // Increased initial coins for bigger trades
+		initialEnergy[i] = 100                // Fixed energy for all participants
 
-		// Create realistic market prices
-		// Buyers: willing to pay 40-60 coins per unit (descending by eagerness)
-		// Sellers: asking 20-50 coins per unit (ascending by desperation)
+		// *** STRATEGIC QUANTITY ASSIGNMENT ***
+		// Ensure buyer demand > seller supply by design
+		var quantity int64
 		if role == zerocash.BUY {
-			// Buyers bid between 40-60, with earlier buyers bidding higher
-			buyerIndex := buyerCount - 1 // 0-based buyer index
-			maxBid := 60
-			minBid := 40
+			// Buyers get variable quantities: 10, 12, 14, 16, ... (increasing demand)
+			buyerIndex := buyerCount - 1
+			quantity = baseQuantity + int64(buyerIndex*2) + 2 // Extra +2 for guaranteed excess
+			totalBuyerDemand += quantity
+		} else {
+			// Sellers get smaller, more consistent quantities: 8, 9, 10, 11, ...
+			sellerIndex := sellerCount - 1
+			quantity = baseQuantity - 2 + int64(sellerIndex) // Start at 8, increment by 1
+			totalSellerSupply += quantity
+		}
+
+		// *** STRATEGIC PRICE ASSIGNMENT ***
+		// Create overlapping ranges that guarantee clean intersection
+		if role == zerocash.BUY {
+			// Buyers bid between 45-65, with earlier buyers bidding higher (descending)
+			buyerIndex := buyerCount - 1
+			maxBid := 65
+			minBid := 45
 			bidRange := maxBid - minBid
 
 			var price int64
 			if numBuyers == 1 {
-				price = int64((maxBid + minBid) / 2) // Use middle price for single buyer
+				price = int64((maxBid + minBid) / 2)
 			} else {
 				price = int64(maxBid - (buyerIndex*bidRange)/(numBuyers-1))
 			}
@@ -175,18 +200,18 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 			orders[i] = zerocash.EnergyOrder{
 				Type:     zerocash.BUY,
 				Price:    big.NewInt(price),
-				Quantity: big.NewInt(10),
+				Quantity: big.NewInt(quantity),
 			}
 		} else {
-			// Sellers ask between 20-50, with earlier sellers asking lower
-			sellerIndex := sellerCount - 1 // 0-based seller index
-			minAsk := 20
-			maxAsk := 50
+			// Sellers ask between 25-45, with earlier sellers asking lower (ascending)
+			sellerIndex := sellerCount - 1
+			minAsk := 25
+			maxAsk := 45
 			askRange := maxAsk - minAsk
 
 			var price int64
 			if numSellers == 1 {
-				price = int64((minAsk + maxAsk) / 2) // Use middle price for single seller
+				price = int64((minAsk + maxAsk) / 2)
 			} else {
 				price = int64(minAsk + (sellerIndex*askRange)/(numSellers-1))
 			}
@@ -197,10 +222,24 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 			orders[i] = zerocash.EnergyOrder{
 				Type:     zerocash.SELL,
 				Price:    big.NewInt(price),
-				Quantity: big.NewInt(10),
+				Quantity: big.NewInt(quantity),
 			}
 		}
 	}
+
+	// *** VERIFICATION: Ensure our assumption holds ***
+	fmt.Printf("CIRCUIT ASSUMPTION CHECK:\n")
+	fmt.Printf("Total Buyer Demand: %d units\n", totalBuyerDemand)
+	fmt.Printf("Total Seller Supply: %d units\n", totalSellerSupply)
+	fmt.Printf("Buyer Demand > Seller Supply: %v\n", totalBuyerDemand > totalSellerSupply)
+	fmt.Printf("Demand Excess: %d units\n", totalBuyerDemand-totalSellerSupply)
+
+	if totalBuyerDemand <= totalSellerSupply {
+		panic(fmt.Sprintf("CIRCUIT ASSUMPTION VIOLATED: Buyer demand (%d) must exceed seller supply (%d)",
+			totalBuyerDemand, totalSellerSupply))
+	}
+
+	fmt.Printf("✅ Circuit assumption satisfied: Buyer curve will cut seller curve\n")
 
 	return MarketConfig{
 		NumParticipants: n,

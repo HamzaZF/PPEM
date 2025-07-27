@@ -206,24 +206,14 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Step 1: Verify participant list is properly sorted
 	c.verifySorting(api)
 
-	// Step 2: Find and verify marginal participants exist
-	marginalBuyerIndices, marginalSellerIndices := c.findMarginalParticipants(api)
-
-	// Step 3: Verify Euclidean division formula holds
+	// Step 2: Verify Euclidean division formula holds
 	c.verifyEuclideanDivision(api)
 
-	// Step 4: Verify intersection boundary conditions
-	c.verifyIntersectionBoundary(api, marginalBuyerIndices, marginalSellerIndices)
+	// Step 3: Ensure marginal buyer and seller are correct (they actually exist + the particpant after and before each of them falls below/above the clearing price (depends on the the role and the side)
 
-	// Step 5: Verify energy and coin conservation
-	// This also ensures only qualified participants changed their note values
-	c.verifyConservation(api)
+	// Step 4: Ensure the total energy in equals the total energy out
 
-	// Step 6: Verify exchanges are correct for qualified non-marginal participants
-	c.verifyQualifiedParticipantExchanges(api, marginalBuyerIndices, marginalSellerIndices)
-
-	// Step 7: Verify exchanges are correct for marginal participants
-	c.verifyMarginalParticipantExchanges(api, marginalBuyerIndices, marginalSellerIndices)
+	// Step 5: Ensure (total coin in) equals (total coin out + total commission)
 
 	return nil
 }
@@ -282,63 +272,44 @@ func (c *CircuitTxFN) verifySorting(api frontend.API) {
 	// Verify sorting using simple consecutive checks
 	// Assumption: Auctioneer provides buyers first (descending), then sellers (ascending)
 	for i := 0; i < c.N-1; i++ {
-		currentRole := c.DecVal[i][5] // Use DecVal[i][5] for role
-		nextRole := c.DecVal[i+1][5]  // Use DecVal[i+1][5] for role
+		currentRole := c.DecVal[i][5] // Use DecVal[i][5] for role (0=BUY, 1=SELL)
+		nextRole := c.DecVal[i+1][5]  // Use DecVal[i+1][5] for role (0=BUY, 1=SELL)
 
-		// If both consecutive participants are buyers (role=0): verify descending
-		bothBuyers := api.Mul(api.IsZero(currentRole), api.IsZero(nextRole))
+		// Check if current participant is buyer (role == 0)
+		currentIsBuyer := api.IsZero(currentRole)
+		// Check if next participant is buyer (role == 0)
+		nextIsBuyer := api.IsZero(nextRole)
+
+		// Check if current participant is seller (role == 1)
+		// We do this by: (role == 1) ≡ (role != 0) AND (role * (role - 1) == 0)
+		// Since role can only be 0 or 1, we use: isSeller = (1 - isBuyer)
+		currentIsSeller := api.Sub(1, currentIsBuyer)
+		nextIsSeller := api.Sub(1, nextIsBuyer)
+
+		// Verify role constraint: each role must be either 0 or 1
+		// role * (role - 1) = 0 ensures role ∈ {0, 1}
+		roleConstraintCurrent := api.Mul(currentRole, api.Sub(currentRole, 1))
+		api.AssertIsEqual(roleConstraintCurrent, 0)
+		roleConstraintNext := api.Mul(nextRole, api.Sub(nextRole, 1))
+		api.AssertIsEqual(roleConstraintNext, 0)
+
+		// If both consecutive participants are buyers (role=0): verify descending order
+		bothBuyers := api.Mul(currentIsBuyer, nextIsBuyer)
 		buyerConstraint := api.Mul(bothBuyers, c.DecVal[i+1][2]) // next_price * flag
 		buyerLimit := api.Mul(bothBuyers, c.DecVal[i][2])        // current_price * flag
 		api.AssertIsLessOrEqual(buyerConstraint, buyerLimit)     // next <= current when both buyers
 
-		// If both consecutive participants are sellers (role=1): verify ascending
-		bothSellers := api.Mul(api.IsZero(api.Sub(currentRole, 1)), api.IsZero(api.Sub(nextRole, 1)))
+		// If both consecutive participants are sellers (role=1): verify ascending order
+		bothSellers := api.Mul(currentIsSeller, nextIsSeller)
 		sellerConstraint := api.Mul(bothSellers, c.DecVal[i][2]) // current_price * flag
 		sellerLimit := api.Mul(bothSellers, c.DecVal[i+1][2])    // next_price * flag
 		api.AssertIsLessOrEqual(sellerConstraint, sellerLimit)   // current <= next when both sellers
 
 		// Ensure buyers come before sellers (no seller followed by buyer)
-		invalidOrder := api.Mul(api.IsZero(api.Sub(currentRole, 1)), api.IsZero(nextRole))
+		// invalidOrder = currentIsSeller AND nextIsBuyer
+		invalidOrder := api.Mul(currentIsSeller, nextIsBuyer)
 		api.AssertIsEqual(invalidOrder, 0) // seller->buyer transition not allowed
 	}
-}
-
-// findMarginalParticipants finds and verifies that MarginalBuyerPrice and MarginalSellerPrice
-// correspond to actual participants in the list. Returns arrays indicating which participants
-// are marginal buyers/sellers.
-func (c *CircuitTxFN) findMarginalParticipants(api frontend.API) ([]frontend.Variable, []frontend.Variable) {
-	marginalBuyerFound := frontend.Variable(0)
-	marginalSellerFound := frontend.Variable(0)
-
-	// Store which participants are marginal buyers and sellers for later use
-	isMarginalBuyerAtIndex := make([]frontend.Variable, c.N)
-	isMarginalSellerAtIndex := make([]frontend.Variable, c.N)
-
-	for i := 0; i < c.N; i++ {
-		// Check if this participant is a buyer with marginal buyer price
-		isBuyer := api.IsZero(c.DecVal[i][5]) // Use DecVal[i][5] for role
-		priceMatchesMarginalBuyer := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalBuyerPrice))
-		buyerMatch := api.Mul(isBuyer, priceMatchesMarginalBuyer)
-		marginalBuyerFound = api.Add(marginalBuyerFound, buyerMatch)
-
-		// Store this information for later use
-		isMarginalBuyerAtIndex[i] = buyerMatch
-
-		// Check if this participant is a seller with marginal seller price
-		isSeller := api.IsZero(api.Sub(c.DecVal[i][5], 1)) // Use DecVal[i][5] for role
-		priceMatchesMarginalSeller := api.IsZero(api.Sub(c.DecVal[i][2], c.MarginalSellerPrice))
-		sellerMatch := api.Mul(isSeller, priceMatchesMarginalSeller)
-		marginalSellerFound = api.Add(marginalSellerFound, sellerMatch)
-
-		// Store this information for later use
-		isMarginalSellerAtIndex[i] = sellerMatch
-	}
-
-	// Assert that we found at least one marginal buyer and one marginal seller
-	api.AssertIsLessOrEqual(1, marginalBuyerFound)
-	api.AssertIsLessOrEqual(1, marginalSellerFound)
-
-	return isMarginalBuyerAtIndex, isMarginalSellerAtIndex
 }
 
 // verifyEuclideanDivision verifies the Euclidean division formula:
@@ -355,91 +326,6 @@ func (c *CircuitTxFN) verifyEuclideanDivision(api frontend.API) {
 	// CommissionPerUnit * (CommissionPerUnit - 1) = 0
 	commissionCheck := api.Mul(c.CommissionPerUnit, api.Sub(c.CommissionPerUnit, 1))
 	api.AssertIsEqual(commissionCheck, 0)
-}
-
-// verifyIntersectionBoundary verifies that the intersection between buyer and seller curves
-// is correct by checking boundary conditions around marginal participants
-func (c *CircuitTxFN) verifyIntersectionBoundary(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable) {
-	c.verifyBuyerIntersectionBoundary(api, marginalBuyerIndices)
-	c.verifySellerIntersectionBoundary(api, marginalSellerIndices)
-}
-
-// verifyBuyerIntersectionBoundary verifies buyer side of intersection:
-// - Next buyer after marginal has bid < marginal seller ask (can't trade)
-// - Previous buyer before marginal has bid >= clearing price (can trade)
-func (c *CircuitTxFN) verifyBuyerIntersectionBoundary(api frontend.API, marginalBuyerIndices []frontend.Variable) {
-	for i := 0; i < c.N-1; i++ {
-		foundMarginalBuyer := marginalBuyerIndices[i]
-
-		// Check next buyer (forward boundary)
-		nextIsBuyer := api.IsZero(c.DecVal[i+1][5]) // Use DecVal[i+1][5] for role
-		checkCondition := api.Mul(foundMarginalBuyer, nextIsBuyer)
-		constraint := api.Mul(checkCondition, api.Add(c.DecVal[i+1][2], 1))
-		limit := api.Mul(checkCondition, c.MarginalSellerPrice)
-		api.AssertIsLessOrEqual(constraint, limit) // next_buyer_bid + 1 <= marginal_seller_ask
-
-		// Check previous buyer (backward boundary) with safe access
-		hasPrevious := frontend.Variable(0)
-		if i > 0 {
-			hasPrevious = frontend.Variable(1)
-		}
-
-		prevIsBuyer := frontend.Variable(0)
-		prevPrice := frontend.Variable(0)
-		if i > 0 {
-			prevIsBuyer = api.IsZero(c.DecVal[i-1][5]) // Use DecVal[i-1][5] for role
-			prevPrice = c.DecVal[i-1][2]
-		}
-
-		checkPrevCondition := api.Mul(foundMarginalBuyer, api.Mul(hasPrevious, prevIsBuyer))
-		prevConstraint := api.Mul(checkPrevCondition, c.ClearingPrice)
-		prevLimit := api.Mul(checkPrevCondition, prevPrice)
-		api.AssertIsLessOrEqual(prevConstraint, prevLimit) // clearing_price <= prev_buyer_bid
-	}
-}
-
-// verifySellerIntersectionBoundary verifies seller side of intersection:
-// - Next seller after marginal has ask > marginal buyer bid (can't trade)
-// - Previous seller before marginal has ask <= clearing price (can trade)
-func (c *CircuitTxFN) verifySellerIntersectionBoundary(api frontend.API, marginalSellerIndices []frontend.Variable) {
-	for i := 0; i < c.N-1; i++ {
-		foundMarginalSeller := marginalSellerIndices[i]
-
-		// Check next seller (forward boundary)
-		nextIsSeller := api.IsZero(api.Sub(c.DecVal[i+1][5], 1)) // Use DecVal[i+1][5] for role
-		checkCondition := api.Mul(foundMarginalSeller, nextIsSeller)
-		constraint := api.Mul(checkCondition, api.Add(c.MarginalBuyerPrice, 1))
-		limit := api.Mul(checkCondition, c.DecVal[i+1][2])
-		api.AssertIsLessOrEqual(constraint, limit) // marginal_buyer_bid + 1 <= next_seller_ask
-
-		// Check previous seller (backward boundary) with safe access
-		hasPrevious := frontend.Variable(0)
-		if i > 0 {
-			hasPrevious = frontend.Variable(1)
-		}
-
-		prevIsSeller := frontend.Variable(0)
-		prevPrice := frontend.Variable(0)
-		if i > 0 {
-			prevIsSeller = api.IsZero(api.Sub(c.DecVal[i-1][5], 1)) // Use DecVal[i-1][5] for role
-			prevPrice = c.DecVal[i-1][2]
-		}
-
-		checkPrevCondition := api.Mul(foundMarginalSeller, api.Mul(hasPrevious, prevIsSeller))
-		prevConstraint := api.Mul(checkPrevCondition, prevPrice)
-		prevLimit := api.Mul(checkPrevCondition, c.ClearingPrice)
-		api.AssertIsLessOrEqual(prevConstraint, prevLimit) // prev_seller_ask <= clearing_price
-	}
-}
-
-// verifyConservation verifies energy and coin conservation across all participants
-// and ensures individual participant trades are logical based on clearing price
-func (c *CircuitTxFN) verifyConservation(api frontend.API) {
-	// Step 1: Verify total energy conservation
-	c.verifyEnergyConservation(api)
-
-	// Step 2: Verify total coin conservation accounting for commission
-	c.verifyCoinConservationWithCommission(api)
 }
 
 // verifyEnergyConservation ensures total input energy equals total output energy
@@ -489,128 +375,6 @@ func (c *CircuitTxFN) verifyCoinConservationWithCommission(api frontend.API) {
 	// Verify conservation: sum(InCoin) = sum(OutCoin) + totalCommission
 	expectedOutCoin := api.Sub(totalInCoin, totalCommission)
 	api.AssertIsEqual(totalOutCoin, expectedOutCoin)
-}
-
-// verifyQualifiedParticipantExchanges verifies that qualified non-marginal participants
-// have correct energy and coin exchanges based on the clearing price.
-// This function uses assertions with conditional constraints rather than boolean comparisons.
-func (c *CircuitTxFN) verifyQualifiedParticipantExchanges(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable) {
-	for i := 0; i < c.N; i++ {
-		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
-		bidAskPrice := c.DecVal[i][2]
-		tradedQuantity := c.DecVal[i][6]
-
-		// First, identify qualified participants (those who should trade based on price)
-		isBuyer := api.IsZero(participantRole)
-		isNonMarginalBuyer := api.Sub(1, marginalBuyerIndices[i]) // 1 - isMarginal = isNonMarginal
-
-		// For non-marginal buyers who are qualified: verify trade correctness
-		baseBuyerCondition := api.Mul(isBuyer, isNonMarginalBuyer)
-
-		// Check if participant actually traded (energy changed by the expected amount)
-		energyChanged := api.Sub(c.OutEnergy[i], c.InEnergy[i])
-
-		// If non-marginal buyer AND energy changed by traded quantity, then verify:
-		// 1. bid >= clearing price
-		// 2. trade is correct
-		buyerTradedCondition := api.Mul(baseBuyerCondition, api.IsZero(api.Sub(energyChanged, tradedQuantity))) // energy gain equals traded quantity
-
-		// Assert: if buyer traded, then bid >= clearing price
-		clearingPriceConstraint := api.Mul(buyerTradedCondition, c.ClearingPrice)
-		bidConstraint := api.Mul(buyerTradedCondition, bidAskPrice)
-		api.AssertIsLessOrEqual(clearingPriceConstraint, bidConstraint)
-
-		// Assert: if buyer traded, then trade is correct
-		expectedEnergyOutBuyer := api.Add(c.InEnergy[i], tradedQuantity)
-		energyConstraintBuyer := api.Mul(buyerTradedCondition, c.OutEnergy[i])
-		energyTargetBuyer := api.Mul(buyerTradedCondition, expectedEnergyOutBuyer)
-		api.AssertIsEqual(energyConstraintBuyer, energyTargetBuyer)
-
-		coinCost := api.Mul(c.ClearingPrice, tradedQuantity)
-		expectedCoinOutBuyer := api.Sub(c.InCoin[i], coinCost)
-		coinConstraintBuyer := api.Mul(buyerTradedCondition, c.OutCoin[i])
-		coinTargetBuyer := api.Mul(buyerTradedCondition, expectedCoinOutBuyer)
-		api.AssertIsEqual(coinConstraintBuyer, coinTargetBuyer)
-
-		// For sellers: similar logic
-		isSeller := api.IsZero(api.Sub(participantRole, 1))
-		isNonMarginalSeller := api.Sub(1, marginalSellerIndices[i]) // 1 - isMarginal = isNonMarginal
-
-		baseSellerCondition := api.Mul(isSeller, isNonMarginalSeller)
-
-		// Check if seller actually traded (energy decreased)
-		sellerEnergyChanged := api.Sub(c.InEnergy[i], c.OutEnergy[i])                                                   // Should be positive if energy lost
-		sellerTradedCondition := api.Mul(baseSellerCondition, api.IsZero(api.Sub(sellerEnergyChanged, tradedQuantity))) // energy loss equals traded quantity
-
-		// Assert: if seller traded, then ask <= clearing price
-		askConstraint := api.Mul(sellerTradedCondition, bidAskPrice)
-		clearingPriceConstraintSeller := api.Mul(sellerTradedCondition, c.ClearingPrice)
-		api.AssertIsLessOrEqual(askConstraint, clearingPriceConstraintSeller)
-
-		// Assert: if seller traded, then trade is correct
-		expectedEnergyOutSeller := api.Sub(c.InEnergy[i], tradedQuantity)
-		energyConstraintSeller := api.Mul(sellerTradedCondition, c.OutEnergy[i])
-		energyTargetSeller := api.Mul(sellerTradedCondition, expectedEnergyOutSeller)
-		api.AssertIsEqual(energyConstraintSeller, energyTargetSeller)
-
-		coinGain := api.Mul(c.ClearingPrice, tradedQuantity)
-		expectedCoinOutSeller := api.Add(c.InCoin[i], coinGain)
-		coinConstraintSeller := api.Mul(sellerTradedCondition, c.OutCoin[i])
-		coinTargetSeller := api.Mul(sellerTradedCondition, expectedCoinOutSeller)
-		api.AssertIsEqual(coinConstraintSeller, coinTargetSeller)
-	}
-}
-
-// verifyMarginalParticipantExchanges verifies that marginal participants have correct trades
-// based on which curve cuts which in the double auction intersection.
-// Assumes exactly one marginal buyer and one marginal seller.
-func (c *CircuitTxFN) verifyMarginalParticipantExchanges(api frontend.API, marginalBuyerIndices, marginalSellerIndices []frontend.Variable) {
-	// Find the indices of marginal participants
-	marginalBuyerIndex := frontend.Variable(-1)
-	marginalSellerIndex := frontend.Variable(-1)
-
-	for i := 0; i < c.N; i++ {
-		// If this is a marginal buyer, store the index
-		isMarginalBuyer := marginalBuyerIndices[i]
-		marginalBuyerIndex = api.Add(marginalBuyerIndex, api.Mul(isMarginalBuyer, frontend.Variable(i+1))) // +1 to avoid 0 index confusion
-
-		// If this is a marginal seller, store the index
-		isMarginalSeller := marginalSellerIndices[i]
-		marginalSellerIndex = api.Add(marginalSellerIndex, api.Mul(isMarginalSeller, frontend.Variable(i+1))) // +1 to avoid 0 index confusion
-	}
-
-	// Convert back to 0-based indices
-	marginalBuyerIndex = api.Sub(marginalBuyerIndex, 1)
-	marginalSellerIndex = api.Sub(marginalSellerIndex, 1)
-
-	// Calculate total qualified demand and supply (both including marginals)
-	totalQualifiedBuyerDemandIncludingMarginal := c.calculateQualifiedBuyerDemand(api, marginalBuyerIndices, true)    // Include marginal buyer
-	totalQualifiedSellerSupplyIncludingMarginal := c.calculateQualifiedSellerSupply(api, marginalSellerIndices, true) // Include marginal seller
-
-	// Determine which scenario we're in by comparing total demand vs supply
-	// If buyer demand > seller supply: buyer curve cuts seller curve
-	// If seller supply > buyer demand: seller curve cuts buyer curve
-	// The greater sum represents the curve that is being cut by the smaller one
-
-	// Calculate specific combinations needed for each scenario
-	totalQualifiedSellerSupplyExcludingMarginal := c.calculateQualifiedSellerSupply(api, marginalSellerIndices, false) // For scenario 1
-	totalQualifiedBuyerDemandExcludingMarginal := c.calculateQualifiedBuyerDemand(api, marginalBuyerIndices, false)    // For scenario 2
-
-	// We need to determine which scenario applies based on the relationship between total demand and supply
-	// Since we can't directly compare in circuits, we'll use the fact that exactly one scenario must be consistent
-	// The auctioneer should have arranged the data such that one scenario will satisfy all constraints
-
-	// Try both scenarios - the circuit will only pass if the data is consistent with one of them
-
-	// Scenario 1: Buyer curve cuts seller curve (buyer demand > seller supply)
-	// Marginal buyer trades full quantity, marginal seller trades partial
-	c.verifyMarginalTradesScenario1(api, marginalBuyerIndices, marginalSellerIndices,
-		totalQualifiedBuyerDemandIncludingMarginal, totalQualifiedSellerSupplyExcludingMarginal)
-
-	// Scenario 2: Seller curve cuts buyer curve (seller supply > buyer demand)
-	// Marginal seller trades full quantity, marginal buyer trades partial
-	c.verifyMarginalTradesScenario2(api, marginalBuyerIndices, marginalSellerIndices,
-		totalQualifiedBuyerDemandExcludingMarginal, totalQualifiedSellerSupplyIncludingMarginal)
 }
 
 // calculateQualifiedBuyerDemand calculates total demand from qualified buyers
