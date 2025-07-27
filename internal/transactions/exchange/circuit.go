@@ -209,6 +209,9 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Step 2: Verify Euclidean division formula holds
 	c.verifyEuclideanDivision(api)
 
+	// Step: ensure participants traded only if they are qualified
+	c.verifyTradeQualification(api)
+
 	// Step 3: Ensure marginal buyer and seller are correct (they actually exist + the particpant after and before each of them falls below/above the clearing price (depends on the the role and the side)
 
 	// Step 4: Ensure the total energy in equals the total energy out
@@ -216,6 +219,35 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Step 5: Ensure (total coin in) equals (total coin out + total commission)
 
 	return nil
+}
+
+// Verify only qualified participants traded (externally computed, internally verified)
+func (c *CircuitTxFN) verifyTradeQualification(api frontend.API) {
+	for i := 0; i < c.N; i++ {
+		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+		price := c.DecVal[i][2]
+
+		// Calculate energy change (OutEnergy - InEnergy)
+		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+
+		// Check if participant actually traded
+		hasTraded := api.IsZero(energyChange) // 0 if traded, 1 if no trade
+		hasTraded = api.Sub(1, hasTraded)     // Flip: 1 if traded, 0 if no trade
+
+		// If buyer traded: bid >= clearing price
+		isBuyer := api.IsZero(participantRole)
+		buyerTradeCondition := api.Mul(isBuyer, hasTraded)
+		buyerPriceCheck := api.Sub(price, c.ClearingPrice) // Should be >= 0
+		buyerConstraint := api.Mul(buyerTradeCondition, buyerPriceCheck)
+		api.AssertIsLessOrEqual(0, buyerConstraint)
+
+		// If seller traded: ask <= clearing price
+		isSeller := api.Sub(1, isBuyer)
+		sellerTradeCondition := api.Mul(isSeller, hasTraded)
+		sellerPriceCheck := api.Sub(c.ClearingPrice, price) // Should be >= 0
+		sellerConstraint := api.Mul(sellerTradeCondition, sellerPriceCheck)
+		api.AssertIsLessOrEqual(0, sellerConstraint)
+	}
 }
 
 // verifyBasicCrypto verifies the basic cryptographic constraints for all participants
