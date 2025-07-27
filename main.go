@@ -132,22 +132,21 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	qualifiedBuyerQuantity = baseQuantity
 
 	if numQualifiedSellers > 0 {
+		// Simple approach: make seller quantities exactly balance buyer demand
 		qualifiedSellerQuantity = totalQualifiedDemand / int64(numQualifiedSellers)
+
+		// Handle remainder by distributing to first few sellers
 		remainder := totalQualifiedDemand % int64(numQualifiedSellers)
-		if remainder != 0 {
-			// Handle remainder by adjusting first seller's quantity
-			qualifiedSellerQuantity = (totalQualifiedDemand + int64(numQualifiedSellers) - 1) / int64(numQualifiedSellers)
-		}
+
+		fmt.Printf("   🔢 Balance calculation: %d demand ÷ %d sellers = %d base + %d remainder\n",
+			totalQualifiedDemand, numQualifiedSellers, qualifiedSellerQuantity, remainder)
 	} else {
 		qualifiedSellerQuantity = baseQuantity
 	}
 
-	// Recalculate actual totals
-	actualQualifiedSupply := int64(numQualifiedSellers) * qualifiedSellerQuantity
-
-	fmt.Printf("   📊 Qualified Market: %d buyers × %d = %d demand | %d sellers × %d = %d supply\n",
+	fmt.Printf("   📊 Qualified Market: %d buyers × %d = %d demand | %d sellers × %d+remainder = %d supply\n",
 		numQualifiedBuyers, qualifiedBuyerQuantity, totalQualifiedDemand,
-		numQualifiedSellers, qualifiedSellerQuantity, actualQualifiedSupply)
+		numQualifiedSellers, qualifiedSellerQuantity, totalQualifiedDemand)
 
 	// Create arrays
 	roles := make(map[int]zerocash.OrderType)
@@ -204,9 +203,13 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 				price = clearingPrice - priceOffset
 				quantity = qualifiedSellerQuantity
 
-				// Handle remainder for perfect balance (adjust first seller)
-				if sellerCount-1 == 0 && totalQualifiedDemand%int64(numQualifiedSellers) != 0 {
-					quantity += totalQualifiedDemand % int64(numQualifiedSellers)
+				// Handle remainder distribution: first few sellers get +1 extra quantity
+				if numQualifiedSellers > 0 {
+					remainder := totalQualifiedDemand % int64(numQualifiedSellers)
+					sellerIndex := sellerCount - 1
+					if int64(sellerIndex) < remainder {
+						quantity += 1 // This seller gets extra unit to balance remainder
+					}
 				}
 			} else {
 				// Unqualified seller: ask above clearing price
