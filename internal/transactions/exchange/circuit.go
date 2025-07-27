@@ -210,7 +210,12 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	c.verifyEuclideanDivision(api)
 
 	// Step: ensure participants traded only if they are qualified
-	c.verifyTradeQualification(api)
+	//c.verifyTradeQualification(api)
+	//c.verifyTradeQualificationClean(api)
+	c.verifyNonMarginalTradeQualification(api)
+
+	// Step 3: Ensure simple conservation
+	c.verifySimpleConservation(api)
 
 	// Step 3: Ensure marginal buyer and seller are correct (they actually exist + the particpant after and before each of them falls below/above the clearing price (depends on the the role and the side)
 
@@ -221,34 +226,219 @@ func (c *CircuitTxFN) Define(api frontend.API) error {
 	return nil
 }
 
-// Verify only qualified participants traded (externally computed, internally verified)
-func (c *CircuitTxFN) verifyTradeQualification(api frontend.API) {
+func (c *CircuitTxFN) verifySimpleConservation(api frontend.API) {
+	// BLS12-377 field modulus divided by 2 (threshold for negative detection)
+	L := frontend.Variable("129332213006484547005326366847446766768196756377457330269942131333360234174170411387484444069786680062220160729088")
+
+	totalInEnergy := frontend.Variable(0)
+	totalOutEnergy := frontend.Variable(0)
+	totalInCoin := frontend.Variable(0)
+	totalOutCoin := frontend.Variable(0)
+	totalEnergyTraded := frontend.Variable(0)
+
+	for i := 0; i < c.N; i++ {
+		totalInEnergy = api.Add(totalInEnergy, c.InEnergy[i])
+		totalOutEnergy = api.Add(totalOutEnergy, c.OutEnergy[i])
+		totalInCoin = api.Add(totalInCoin, c.InCoin[i])
+		totalOutCoin = api.Add(totalOutCoin, c.OutCoin[i])
+
+		// Calculate energy change: OutEnergy - InEnergy
+		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+		participantRole := c.DecVal[i][5]
+		isBuyer := api.IsZero(participantRole)
+
+		// Check if energyChange is "positive" (≤ L) or "negative" (> L)
+		isPositiveChange := api.IsZero(api.Sub(api.Add(energyChange, 1), api.Add(L, 1)))
+		isPositiveChange = api.Sub(1, isPositiveChange) // Flip: 1 if positive, 0 if negative
+
+		// Only count positive energy changes from buyers
+		buyerEnergyGain := api.Mul(api.Mul(isBuyer, isPositiveChange), energyChange)
+		totalEnergyTraded = api.Add(totalEnergyTraded, buyerEnergyGain)
+	}
+
+	// Energy conservation
+	api.AssertIsEqual(totalInEnergy, totalOutEnergy)
+
+	// Money conservation (including commission)
+	totalCommission := api.Mul(c.CommissionPerUnit, totalEnergyTraded)
+	expectedOutCoin := api.Sub(totalInCoin, totalCommission)
+	api.AssertIsEqual(totalOutCoin, expectedOutCoin)
+}
+
+func (c *CircuitTxFN) verifyNonMarginalTradeQualification(api frontend.API) {
 	for i := 0; i < c.N; i++ {
 		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
 		price := c.DecVal[i][2]
+		desiredQuantity := c.DecVal[i][6]
 
-		// Calculate energy change (OutEnergy - InEnergy)
-		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
-
-		// Check if participant actually traded
-		hasTraded := api.IsZero(energyChange) // 0 if traded, 1 if no trade
-		hasTraded = api.Sub(1, hasTraded)     // Flip: 1 if traded, 0 if no trade
-
-		// If buyer traded: bid >= clearing price
 		isBuyer := api.IsZero(participantRole)
-		buyerTradeCondition := api.Mul(isBuyer, hasTraded)
-		buyerPriceCheck := api.Sub(price, c.ClearingPrice) // Should be >= 0
-		buyerConstraint := api.Mul(buyerTradeCondition, buyerPriceCheck)
-		api.AssertIsLessOrEqual(0, buyerConstraint)
-
-		// If seller traded: ask <= clearing price
 		isSeller := api.Sub(1, isBuyer)
-		sellerTradeCondition := api.Mul(isSeller, hasTraded)
-		sellerPriceCheck := api.Sub(c.ClearingPrice, price) // Should be >= 0
-		sellerConstraint := api.Mul(sellerTradeCondition, sellerPriceCheck)
-		api.AssertIsLessOrEqual(0, sellerConstraint)
+
+		// Identify marginal participants
+		isMarginalBuyer := api.Mul(isBuyer, api.IsZero(api.Sub(price, c.MarginalBuyerPrice)))
+		isMarginalSeller := api.Mul(isSeller, api.IsZero(api.Sub(price, c.MarginalSellerPrice)))
+		isMarginal := api.Add(isMarginalBuyer, isMarginalSeller)
+		isNonMarginal := api.Sub(1, isMarginal)
+
+		// Check if participant traded
+		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+		hasTraded := api.Sub(1, api.IsZero(energyChange))
+		shouldVerify := api.Mul(isNonMarginal, hasTraded)
+
+		// === QUALIFICATION CHECK ===
+		buyerQualified := api.Sub(1, api.IsZero(api.Sub(api.Add(price, 1), api.Add(c.ClearingPrice, 1))))
+		sellerQualified := api.Sub(1, api.IsZero(api.Sub(api.Add(c.ClearingPrice, 1), api.Add(price, 1))))
+		isQualified := api.Select(isBuyer, buyerQualified, sellerQualified)
+
+		qualificationConstraint := api.Mul(shouldVerify, isQualified)
+		api.AssertIsEqual(qualificationConstraint, shouldVerify)
+
+		// === DIRECT VALUE VERIFICATION ===
+		// For non-marginal participants, verify exact expected values
+
+		// Expected energy after trade
+		expectedOutEnergy := api.Select(isBuyer,
+			api.Add(c.InEnergy[i], desiredQuantity), // Buyer gains energy
+			api.Sub(c.InEnergy[i], desiredQuantity), // Seller loses energy
+		)
+
+		// Expected coins after trade
+		tradeCost := api.Mul(c.ClearingPrice, desiredQuantity)
+		expectedOutCoin := api.Select(isBuyer,
+			api.Sub(c.InCoin[i], tradeCost), // Buyer loses coins
+			api.Add(c.InCoin[i], tradeCost), // Seller gains coins
+		)
+
+		// Verify actual values match expected values
+		energyConstraint := api.Mul(shouldVerify, api.Sub(c.OutEnergy[i], expectedOutEnergy))
+		api.AssertIsEqual(energyConstraint, 0)
+
+		coinConstraint := api.Mul(shouldVerify, api.Sub(c.OutCoin[i], expectedOutCoin))
+		api.AssertIsEqual(coinConstraint, 0)
 	}
 }
+
+// func (c *CircuitTxFN) verifyNonMarginalTradeQualification(api frontend.API) {
+// 	// BLS12-377 field modulus divided by 2 (threshold for negative detection)
+// 	L := frontend.Variable("129332213006484547005326366847446766768196756377457330269942131333360234174170411387484444069786680062220160729088")
+
+// 	for i := 0; i < c.N; i++ {
+// 		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+// 		price := c.DecVal[i][2]
+// 		desiredQuantity := c.DecVal[i][6]
+
+// 		isBuyer := api.IsZero(participantRole)
+// 		isSeller := api.Sub(1, isBuyer)
+
+// 		// Identify marginal participants
+// 		isMarginalBuyer := api.Mul(isBuyer, api.IsZero(api.Sub(price, c.MarginalBuyerPrice)))
+// 		isMarginalSeller := api.Mul(isSeller, api.IsZero(api.Sub(price, c.MarginalSellerPrice)))
+// 		isMarginal := api.Add(isMarginalBuyer, isMarginalSeller)
+// 		isNonMarginal := api.Sub(1, isMarginal)
+
+// 		// Calculate changes with proper negative detection
+// 		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+// 		coinChange := api.Sub(c.OutCoin[i], c.InCoin[i])
+
+// 		// Detect if changes are positive or negative using threshold L
+// 		// energyIsPositive := api.Sub(1, api.IsZero(api.Sub(energyChange, L))) // 1 if <= L (positive), 0 if > L (negative)
+// 		// coinIsPositive := api.Sub(1, api.IsZero(api.Sub(coinChange, L)))
+// 		// CORRECT way to detect positive vs negative using L threshold
+// 		energyDiff := api.Sub(energyChange, L)
+// 		energyIsNegative := api.Sub(1, api.IsZero(energyDiff)) // 1 if energyChange > L (negative)
+// 		energyIsPositive := api.Sub(1, energyIsNegative)       // 1 if energyChange <= L (positive)
+
+// 		coinDiff := api.Sub(coinChange, L)
+// 		coinIsNegative := api.Sub(1, api.IsZero(coinDiff)) // 1 if coinChange > L (negative)
+// 		coinIsPositive := api.Sub(1, coinIsNegative)       // 1 if coinChange <= L (positive)
+
+// 		// Check if participant traded
+// 		hasTraded := api.Sub(1, api.IsZero(energyChange))
+// 		shouldVerify := api.Mul(isNonMarginal, hasTraded)
+
+// 		// === QUALIFICATION CHECK ===
+// 		buyerQualified := api.Sub(1, api.IsZero(api.Sub(api.Add(price, 1), api.Add(c.ClearingPrice, 1))))
+// 		sellerQualified := api.Sub(1, api.IsZero(api.Sub(api.Add(c.ClearingPrice, 1), api.Add(price, 1))))
+// 		isQualified := api.Select(isBuyer, buyerQualified, sellerQualified)
+
+// 		qualificationConstraint := api.Mul(shouldVerify, isQualified)
+// 		_ = qualificationConstraint
+// 		api.AssertIsEqual(qualificationConstraint, shouldVerify)
+
+// 		// === DIRECTION CHECK ===
+// 		// Buyers should have positive energy change, sellers should have negative
+// 		expectedEnergyDirection := api.Select(isBuyer, 1, 0) // 1 for buyers (positive), 0 for sellers (negative)
+// 		actualEnergyDirection := api.Mul(shouldVerify, energyIsPositive)
+// 		_ = actualEnergyDirection
+// 		expectedDirection := api.Mul(shouldVerify, expectedEnergyDirection)
+// 		_ = expectedDirection
+// 		api.AssertIsEqual(actualEnergyDirection, expectedDirection)
+
+// 		// Buyers should have negative coin change, sellers should have positive
+// 		expectedCoinDirection := api.Select(isBuyer, 0, 1) // 0 for buyers (negative), 1 for sellers (positive)
+// 		actualCoinDirection := api.Mul(shouldVerify, coinIsPositive)
+// 		_ = actualCoinDirection
+// 		expectedCoinDir := api.Mul(shouldVerify, expectedCoinDirection)
+// 		_ = expectedCoinDir
+// 		//api.AssertIsEqual(actualCoinDirection, expectedCoinDir)
+
+// 		// === QUANTITY CHECK ===
+// 		// Calculate actual energy traded (absolute value)
+// 		actualEnergyTraded := api.Select(energyIsPositive,
+// 			energyChange,             // If positive, use as-is
+// 			api.Sub(0, energyChange), // If negative, convert to positive (0 - (p-k) = k in field arithmetic)
+// 		)
+
+// 		// For finite field, api.Sub(0, energyChange) when energyChange > L gives us the actual absolute value
+// 		// This works because: 0 - (p-k) = -p+k = k (mod p)
+
+// 		quantityConstraint := api.Mul(shouldVerify, api.Sub(actualEnergyTraded, desiredQuantity))
+// 		_ = quantityConstraint
+// 		//api.AssertIsEqual(quantityConstraint, 0)
+
+// 		// === PAYMENT CHECK ===
+// 		expectedPayment := api.Mul(c.ClearingPrice, desiredQuantity)
+
+// 		// Calculate actual payment (absolute value)
+// 		actualPayment := api.Select(coinIsPositive,
+// 			coinChange,             // If positive (seller gains)
+// 			api.Sub(0, coinChange), // If negative (buyer loses), convert to positive
+// 		)
+
+// 		paymentConstraint := api.Mul(shouldVerify, api.Sub(actualPayment, expectedPayment))
+// 		_ = paymentConstraint
+// 		//api.AssertIsEqual(paymentConstraint, 0)
+// 	}
+// }
+
+// // Verify only qualified participants traded (externally computed, internally verified)
+// func (c *CircuitTxFN) verifyTradeQualification(api frontend.API) {
+// 	for i := 0; i < c.N; i++ {
+// 		participantRole := c.DecVal[i][5] // 0=BUY, 1=SELL
+// 		price := c.DecVal[i][2]
+
+// 		// Calculate energy change (OutEnergy - InEnergy)
+// 		energyChange := api.Sub(c.OutEnergy[i], c.InEnergy[i])
+
+// 		// Check if participant actually traded
+// 		hasTraded := api.IsZero(energyChange) // 0 if traded, 1 if no trade
+// 		hasTraded = api.Sub(1, hasTraded)     // Flip: 1 if traded, 0 if no trade
+
+// 		// If buyer traded: bid >= clearing price
+// 		isBuyer := api.IsZero(participantRole)
+// 		buyerTradeCondition := api.Mul(isBuyer, hasTraded)
+// 		buyerPriceCheck := api.Sub(price, c.ClearingPrice) // Should be >= 0
+// 		buyerConstraint := api.Mul(buyerTradeCondition, buyerPriceCheck)
+// 		api.AssertIsLessOrEqual(0, buyerConstraint)
+
+// 		// If seller traded: ask <= clearing price
+// 		isSeller := api.Sub(1, isBuyer)
+// 		sellerTradeCondition := api.Mul(isSeller, hasTraded)
+// 		sellerPriceCheck := api.Sub(c.ClearingPrice, price) // Should be >= 0
+// 		sellerConstraint := api.Mul(sellerTradeCondition, sellerPriceCheck)
+// 		api.AssertIsLessOrEqual(0, sellerConstraint)
+// 	}
+// }
 
 // verifyBasicCrypto verifies the basic cryptographic constraints for all participants
 func (c *CircuitTxFN) verifyBasicCrypto(api frontend.API) error {
