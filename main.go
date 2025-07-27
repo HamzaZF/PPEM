@@ -83,8 +83,8 @@ func createDefaultMarketConfig() MarketConfig {
 	}
 }
 
-// createMarketConfigForN creates a realistic market configuration for any number of participants
-// that GUARANTEES "buyer curve cuts seller curve" scenario for circuit verification.
+// createMarketConfigForN creates a PERFECT INTERSECTION market configuration for any number of participants
+// This GUARANTEES that qualified buyer demand = qualified seller supply exactly for circuit verification.
 // buyerRatio specifies what fraction should be buyers (0.0 to 1.0). Default 0.5 means balanced market.
 func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	if n <= 0 {
@@ -93,12 +93,6 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	if buyerRatio < 0.0 || buyerRatio > 1.0 {
 		panic("createMarketConfigForN: buyerRatio must be between 0.0 and 1.0")
 	}
-
-	// Create realistic mixed roles with flexible buyer/seller ratio
-	roles := make(map[int]zerocash.OrderType)
-	initialCoins := make([]int64, n)
-	initialEnergy := make([]int64, n)
-	orders := make([]zerocash.EnergyOrder, n)
 
 	// Calculate number of buyers and sellers based on ratio
 	numBuyers := int(float64(n) * buyerRatio)
@@ -114,136 +108,143 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		numBuyers = n - 1
 	}
 
-	fmt.Printf("Market composition: %d buyers, %d sellers (%.1f%% buyers)\n",
+	fmt.Printf("🎯 Perfect Intersection Market: %d buyers, %d sellers (%.1f%% buyers)\n",
 		numBuyers, numSellers, buyerRatio*100)
 
-	// *** CIRCUIT ASSUMPTION ENFORCEMENT ***
-	// We need to guarantee: Total Buyer Demand > Total Seller Supply
-	// Strategy: Buyers get larger quantities on average + overlapping price ranges
+	// *** PERFECT INTERSECTION STRATEGY ***
+	// 1. Choose a clearing price (45)
+	// 2. Make half of buyers/sellers qualified (bid >= clearing / ask <= clearing)
+	// 3. Ensure qualified demand = qualified supply exactly
+	// 4. Use fixed quantities for simplicity
 
-	// Create a mixed pattern of buyers and sellers
+	clearingPrice := int64(45)
+	baseQuantity := int64(15) // Fixed quantity for simplicity
+
+	// Calculate qualified participants (about half of each type)
+	numQualifiedBuyers := (numBuyers + 1) / 2   // Round up
+	numQualifiedSellers := (numSellers + 1) / 2 // Round up
+
+	// Calculate total qualified demand and supply
+	totalQualifiedDemand := int64(numQualifiedBuyers) * baseQuantity
+
+	// Adjust seller quantities to ensure PERFECT BALANCE
+	var qualifiedBuyerQuantity, qualifiedSellerQuantity int64
+	qualifiedBuyerQuantity = baseQuantity
+
+	if numQualifiedSellers > 0 {
+		qualifiedSellerQuantity = totalQualifiedDemand / int64(numQualifiedSellers)
+		remainder := totalQualifiedDemand % int64(numQualifiedSellers)
+		if remainder != 0 {
+			// Handle remainder by adjusting first seller's quantity
+			qualifiedSellerQuantity = (totalQualifiedDemand + int64(numQualifiedSellers) - 1) / int64(numQualifiedSellers)
+		}
+	} else {
+		qualifiedSellerQuantity = baseQuantity
+	}
+
+	// Recalculate actual totals
+	actualQualifiedSupply := int64(numQualifiedSellers) * qualifiedSellerQuantity
+
+	fmt.Printf("   📊 Qualified Market: %d buyers × %d = %d demand | %d sellers × %d = %d supply\n",
+		numQualifiedBuyers, qualifiedBuyerQuantity, totalQualifiedDemand,
+		numQualifiedSellers, qualifiedSellerQuantity, actualQualifiedSupply)
+
+	// Create arrays
+	roles := make(map[int]zerocash.OrderType)
+	initialCoins := make([]int64, n)
+	initialEnergy := make([]int64, n)
+	orders := make([]zerocash.EnergyOrder, n)
+
+	// Generate participants
 	buyerCount := 0
 	sellerCount := 0
 
-	// Calculate base quantities to ensure buyer demand > seller supply
-	// Give buyers 20% more total demand than sellers can supply
-	totalBuyerDemand := int64(0)
-	totalSellerSupply := int64(0)
-	baseQuantity := int64(10)
-
 	for i := 0; i < n; i++ {
+		// Assign roles in alternating pattern for good distribution
 		var role zerocash.OrderType
-
-		// Distribute roles based on calculated counts
-		if buyerCount < numBuyers && sellerCount < numSellers {
-			// Both types available, alternate for good distribution
-			if i%2 == 0 && buyerCount < numBuyers {
-				role = zerocash.BUY
-				buyerCount++
-			} else if sellerCount < numSellers {
-				role = zerocash.SELL
-				sellerCount++
-			} else {
-				role = zerocash.BUY
-				buyerCount++
-			}
-		} else if buyerCount < numBuyers {
-			// Only buyers left
+		if buyerCount < numBuyers && (sellerCount >= numSellers || i%2 == 0) {
 			role = zerocash.BUY
 			buyerCount++
 		} else {
-			// Only sellers left
 			role = zerocash.SELL
 			sellerCount++
 		}
 
 		roles[i] = role
 
-		// Initial balances: vary based on participant index
-		initialCoins[i] = int64(2000 + i*100) // Increased initial coins for bigger trades
-		initialEnergy[i] = 100                // Fixed energy for all participants
+		// Generate realistic initial balances
+		initialCoins[i] = 2000 + int64(i)*100 + clearingPrice*baseQuantity*2 // Enough for trading
+		initialEnergy[i] = 100 + int64(i)*10 + baseQuantity*2                // Enough energy
 
-		// *** STRATEGIC QUANTITY ASSIGNMENT ***
-		// Ensure buyer demand > seller supply by design
-		var quantity int64
+		// Generate orders that create perfect intersection
+		var price, quantity int64
+
 		if role == zerocash.BUY {
-			// Buyers get variable quantities: 10, 12, 14, 16, ... (increasing demand)
-			buyerIndex := buyerCount - 1
-			quantity = baseQuantity + int64(buyerIndex*2) + 2 // Extra +2 for guaranteed excess
-			totalBuyerDemand += quantity
+			// Determine if this buyer qualifies
+			isQualified := (buyerCount - 1) < numQualifiedBuyers
+
+			if isQualified {
+				// Qualified buyer: bid at or above clearing price
+				priceOffset := int64((buyerCount - 1) * 3) // Spread: 45, 48, 51, 54, ...
+				price = clearingPrice + priceOffset
+				quantity = qualifiedBuyerQuantity
+			} else {
+				// Unqualified buyer: bid below clearing price
+				unqualifiedOffset := int64((buyerCount - numQualifiedBuyers) * 2)
+				price = clearingPrice - unqualifiedOffset - 1 // Below clearing: 44, 42, 40, ...
+				quantity = baseQuantity
+			}
 		} else {
-			// Sellers get smaller, more consistent quantities: 8, 9, 10, 11, ...
-			sellerIndex := sellerCount - 1
-			quantity = baseQuantity - 2 + int64(sellerIndex) // Start at 8, increment by 1
-			totalSellerSupply += quantity
+			// Determine if this seller qualifies
+			isQualified := (sellerCount - 1) < numQualifiedSellers
+
+			if isQualified {
+				// Qualified seller: ask at or below clearing price
+				priceOffset := int64((sellerCount - 1) * 3) // Spread: 45, 42, 39, 36, ...
+				price = clearingPrice - priceOffset
+				quantity = qualifiedSellerQuantity
+
+				// Handle remainder for perfect balance (adjust first seller)
+				if sellerCount-1 == 0 && totalQualifiedDemand%int64(numQualifiedSellers) != 0 {
+					quantity += totalQualifiedDemand % int64(numQualifiedSellers)
+				}
+			} else {
+				// Unqualified seller: ask above clearing price
+				unqualifiedOffset := int64((sellerCount - numQualifiedSellers) * 2)
+				price = clearingPrice + unqualifiedOffset + 1 // Above clearing: 46, 48, 50, ...
+				quantity = baseQuantity
+			}
 		}
 
-		// *** STRATEGIC PRICE ASSIGNMENT ***
-		// Create overlapping ranges that guarantee clean intersection
-		if role == zerocash.BUY {
-			// Buyers bid between 45-65, with earlier buyers bidding higher (descending)
-			buyerIndex := buyerCount - 1
-			maxBid := 65
-			minBid := 45
-			bidRange := maxBid - minBid
-
-			var price int64
-			if numBuyers == 1 {
-				price = int64((maxBid + minBid) / 2)
-			} else {
-				price = int64(maxBid - (buyerIndex*bidRange)/(numBuyers-1))
-			}
-			if price < int64(minBid) {
-				price = int64(minBid)
-			}
-
-			orders[i] = zerocash.EnergyOrder{
-				Type:     zerocash.BUY,
-				Price:    big.NewInt(price),
-				Quantity: big.NewInt(quantity),
-			}
-		} else {
-			// Sellers ask between 25-45, with earlier sellers asking lower (ascending)
-			sellerIndex := sellerCount - 1
-			minAsk := 25
-			maxAsk := 45
-			askRange := maxAsk - minAsk
-
-			var price int64
-			if numSellers == 1 {
-				price = int64((minAsk + maxAsk) / 2)
-			} else {
-				price = int64(minAsk + (sellerIndex*askRange)/(numSellers-1))
-			}
-			if price > int64(maxAsk) {
-				price = int64(maxAsk)
-			}
-
-			orders[i] = zerocash.EnergyOrder{
-				Type:     zerocash.SELL,
-				Price:    big.NewInt(price),
-				Quantity: big.NewInt(quantity),
-			}
+		orders[i] = zerocash.EnergyOrder{
+			Type:     role,
+			Price:    big.NewInt(price),
+			Quantity: big.NewInt(quantity),
 		}
 	}
 
-	// *** VERIFICATION: Ensure our assumption holds ***
-	fmt.Printf("CIRCUIT ASSUMPTION CHECK:\n")
-	fmt.Printf("Total Buyer Demand: %d units\n", totalBuyerDemand)
-	fmt.Printf("Total Seller Supply: %d units\n", totalSellerSupply)
-	fmt.Printf("Buyer Demand > Seller Supply: %v\n", totalBuyerDemand > totalSellerSupply)
-	fmt.Printf("Demand Excess: %d units\n", totalBuyerDemand-totalSellerSupply)
-
-	if totalBuyerDemand <= totalSellerSupply {
-		panic(fmt.Sprintf("CIRCUIT ASSUMPTION VIOLATED: Buyer demand (%d) must exceed seller supply (%d)",
-			totalBuyerDemand, totalSellerSupply))
+	// *** VERIFICATION: Ensure perfect intersection ***
+	var verifyQualifiedDemand, verifyQualifiedSupply int64
+	for i := 0; i < n; i++ {
+		if roles[i] == zerocash.BUY && orders[i].Price.Int64() >= clearingPrice {
+			verifyQualifiedDemand += orders[i].Quantity.Int64()
+		}
+		if roles[i] == zerocash.SELL && orders[i].Price.Int64() <= clearingPrice {
+			verifyQualifiedSupply += orders[i].Quantity.Int64()
+		}
 	}
 
-	fmt.Printf("✅ Circuit assumption satisfied: Buyer curve will cut seller curve\n")
+	fmt.Printf("   ✅ Perfect Intersection Verification: Demand=%d, Supply=%d (Equal: %t)\n",
+		verifyQualifiedDemand, verifyQualifiedSupply, verifyQualifiedDemand == verifyQualifiedSupply)
+
+	if verifyQualifiedDemand != verifyQualifiedSupply {
+		panic(fmt.Sprintf("FATAL: Perfect intersection failed! Demand=%d ≠ Supply=%d",
+			verifyQualifiedDemand, verifyQualifiedSupply))
+	}
 
 	return MarketConfig{
 		NumParticipants: n,
-		AuctionType:     "sealed-bid-double-auction",
+		AuctionType:     "perfect-intersection-double-auction",
 		Roles:           roles,
 		InitialCoins:    initialCoins,
 		InitialEnergy:   initialEnergy,
