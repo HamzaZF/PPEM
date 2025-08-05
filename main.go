@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	mrand "math/rand"
 	"os"
 	"time"
 
@@ -83,8 +84,8 @@ func createDefaultMarketConfig() MarketConfig {
 	}
 }
 
-// createMarketConfigForN creates a PERFECT INTERSECTION market configuration for any number of participants
-// This GUARANTEES that qualified buyer demand = qualified seller supply exactly for circuit verification.
+// createMarketConfigForN creates a RANDOM market configuration that GUARANTEES a perfect vertical intersection
+// This means supply = demand exactly at the clearing price, but everything else is random.
 // buyerRatio specifies what fraction should be buyers (0.0 to 1.0). Default 0.5 means balanced market.
 func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	if n <= 0 {
@@ -108,45 +109,145 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		numBuyers = n - 1
 	}
 
-	fmt.Printf("🎯 Perfect Intersection Market: %d buyers, %d sellers (%.1f%% buyers)\n",
+	fmt.Printf("🎯 Random Perfect Intersection Market: %d buyers, %d sellers (%.1f%% buyers)\n",
 		numBuyers, numSellers, buyerRatio*100)
 
-	// *** PERFECT INTERSECTION STRATEGY ***
-	// 1. Choose a clearing price (45)
-	// 2. Make half of buyers/sellers qualified (bid >= clearing / ask <= clearing)
-	// 3. Ensure qualified demand = qualified supply exactly
-	// 4. Use fixed quantities for simplicity
+	// *** RANDOM PERFECT INTERSECTION STRATEGY ***
+	// 1. Generate random clearing price (20-80 range)
+	// 2. Generate random quantities for each participant
+	// 3. Generate random prices around clearing price
+	// 4. Ensure supply = demand exactly at clearing price
+	// 5. CRITICAL: Leave at least one buyer and one seller OUT of the auction
 
-	clearingPrice := int64(45)
-	baseQuantity := int64(15) // Fixed quantity for simplicity
+	// Generate random clearing price
+	clearingPrice := int64(20 + mrand.Intn(61)) // Random price between 20-80
 
-	// Calculate qualified participants (about half of each type)
-	numQualifiedBuyers := (numBuyers + 1) / 2   // Round up
-	numQualifiedSellers := (numSellers + 1) / 2 // Round up
+	// Generate random quantities for each participant (5-25 range)
+	buyerQuantities := make([]int64, numBuyers)
+	sellerQuantities := make([]int64, numSellers)
 
-	// Calculate total qualified demand and supply
-	totalQualifiedDemand := int64(numQualifiedBuyers) * baseQuantity
-
-	// Adjust seller quantities to ensure PERFECT BALANCE
-	var qualifiedBuyerQuantity, qualifiedSellerQuantity int64
-	qualifiedBuyerQuantity = baseQuantity
-
-	if numQualifiedSellers > 0 {
-		// Simple approach: make seller quantities exactly balance buyer demand
-		qualifiedSellerQuantity = totalQualifiedDemand / int64(numQualifiedSellers)
-
-		// Handle remainder by distributing to first few sellers
-		remainder := totalQualifiedDemand % int64(numQualifiedSellers)
-
-		fmt.Printf("   🔢 Balance calculation: %d demand ÷ %d sellers = %d base + %d remainder\n",
-			totalQualifiedDemand, numQualifiedSellers, qualifiedSellerQuantity, remainder)
-	} else {
-		qualifiedSellerQuantity = baseQuantity
+	for i := 0; i < numBuyers; i++ {
+		buyerQuantities[i] = int64(5 + mrand.Intn(21)) // Random quantity 5-25
+	}
+	for i := 0; i < numSellers; i++ {
+		sellerQuantities[i] = int64(5 + mrand.Intn(21)) // Random quantity 5-25
 	}
 
-	fmt.Printf("   📊 Qualified Market: %d buyers × %d = %d demand | %d sellers × %d+remainder = %d supply\n",
-		numQualifiedBuyers, qualifiedBuyerQuantity, totalQualifiedDemand,
-		numQualifiedSellers, qualifiedSellerQuantity, totalQualifiedDemand)
+	// CRITICAL CHANGE: Only subset of participants qualify
+	// Ensure at least 1 buyer and 1 seller are excluded
+	maxQualifiedBuyers := numBuyers - 1   // Leave at least 1 buyer out
+	maxQualifiedSellers := numSellers - 1 // Leave at least 1 seller out
+
+	// If we have many participants, exclude more for realism
+	if numBuyers >= 4 {
+		maxQualifiedBuyers = numBuyers - mrand.Intn(2) - 1 // Exclude 1-2 buyers
+	}
+	if numSellers >= 4 {
+		maxQualifiedSellers = numSellers - mrand.Intn(2) - 1 // Exclude 1-2 sellers
+	}
+
+	// Ensure we have at least some participants
+	if maxQualifiedBuyers < 1 {
+		maxQualifiedBuyers = 1
+	}
+	if maxQualifiedSellers < 1 {
+		maxQualifiedSellers = 1
+	}
+
+	fmt.Printf("   🎯 Auction participation: %d/%d buyers, %d/%d sellers will qualify\n",
+		maxQualifiedBuyers, numBuyers, maxQualifiedSellers, numSellers)
+
+	// Calculate qualified supply and demand
+	totalQualifiedDemand := int64(0)
+	totalQualifiedSupply := int64(0)
+
+	for i := 0; i < maxQualifiedBuyers; i++ {
+		totalQualifiedDemand += buyerQuantities[i]
+	}
+	for i := 0; i < maxQualifiedSellers; i++ {
+		totalQualifiedSupply += sellerQuantities[i]
+	}
+
+	fmt.Printf("   📊 Initial qualified quantities: Supply=%d, Demand=%d\n", totalQualifiedSupply, totalQualifiedDemand)
+
+	// *** PERFECT INTERSECTION ADJUSTMENT FOR QUALIFIED PARTICIPANTS ONLY ***
+	// Adjust qualified quantities to ensure supply = demand exactly
+	if totalQualifiedSupply != totalQualifiedDemand {
+		if totalQualifiedSupply > totalQualifiedDemand {
+			// Too much qualified supply, reduce qualified seller quantities
+			excess := totalQualifiedSupply - totalQualifiedDemand
+			fmt.Printf("   🔧 Adjusting: Qualified supply exceeds demand by %d\n", excess)
+
+			// Distribute excess reduction across qualified sellers
+			for i := 0; i < maxQualifiedSellers && excess > 0; i++ {
+				reduction := excess / int64(maxQualifiedSellers-i)
+				if reduction > sellerQuantities[i] {
+					reduction = sellerQuantities[i]
+				}
+				sellerQuantities[i] -= reduction
+				excess -= reduction
+			}
+		} else {
+			// Too much qualified demand, reduce qualified buyer quantities
+			excess := totalQualifiedDemand - totalQualifiedSupply
+			fmt.Printf("   🔧 Adjusting: Qualified demand exceeds supply by %d\n", excess)
+
+			// Distribute excess reduction across qualified buyers
+			for i := 0; i < maxQualifiedBuyers && excess > 0; i++ {
+				reduction := excess / int64(maxQualifiedBuyers-i)
+				if reduction > buyerQuantities[i] {
+					reduction = buyerQuantities[i]
+				}
+				buyerQuantities[i] -= reduction
+				excess -= reduction
+			}
+		}
+	}
+
+	// Recalculate qualified totals after adjustment
+	totalQualifiedSupply = int64(0)
+	totalQualifiedDemand = int64(0)
+	for i := 0; i < maxQualifiedBuyers; i++ {
+		totalQualifiedDemand += buyerQuantities[i]
+	}
+	for i := 0; i < maxQualifiedSellers; i++ {
+		totalQualifiedSupply += sellerQuantities[i]
+	}
+
+	fmt.Printf("   ✅ Perfect Intersection (qualified only): Supply=%d, Demand=%d (Equal: %t)\n",
+		totalQualifiedSupply, totalQualifiedDemand, totalQualifiedSupply == totalQualifiedDemand)
+
+	// Generate random prices with proper qualification structure
+	buyerPrices := make([]int64, numBuyers)
+	sellerPrices := make([]int64, numSellers)
+
+	// Generate qualified buyer prices (above clearing price)
+	for i := 0; i < maxQualifiedBuyers; i++ {
+		// Qualified buyers: bid above clearing price
+		priceOffset := int64(mrand.Intn(21) + 5) // 5-25 above clearing
+		buyerPrices[i] = clearingPrice + priceOffset
+	}
+
+	// Generate unqualified buyer prices (below clearing price)
+	for i := maxQualifiedBuyers; i < numBuyers; i++ {
+		// Unqualified buyers: bid below clearing price
+		priceOffset := int64(mrand.Intn(15) + 5) // 5-19 below clearing
+		buyerPrices[i] = clearingPrice - priceOffset
+	}
+
+	// Generate qualified seller prices (below clearing price)
+	for i := 0; i < maxQualifiedSellers; i++ {
+		// Qualified sellers: ask below clearing price
+		priceOffset := int64(mrand.Intn(21) + 5) // 5-25 below clearing
+		sellerPrices[i] = clearingPrice - priceOffset
+	}
+
+	// Generate unqualified seller prices (above clearing price)
+	for i := maxQualifiedSellers; i < numSellers; i++ {
+		// Unqualified sellers: ask above clearing price
+		priceOffset := int64(mrand.Intn(15) + 5) // 5-19 above clearing
+		sellerPrices[i] = clearingPrice + priceOffset
+	}
 
 	// Create arrays
 	roles := make(map[int]zerocash.OrderType)
@@ -154,7 +255,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 	initialEnergy := make([]int64, n)
 	orders := make([]zerocash.EnergyOrder, n)
 
-	// Generate participants
+	// Generate participants with alternating roles for good distribution
 	buyerCount := 0
 	sellerCount := 0
 
@@ -171,53 +272,20 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 
 		roles[i] = role
 
-		// Generate realistic initial balances
-		initialCoins[i] = 2000 + int64(i)*100 + clearingPrice*baseQuantity*2 // Enough for trading
-		initialEnergy[i] = 100 + int64(i)*10 + baseQuantity*2                // Enough energy
-
-		// Generate orders that create perfect intersection
+		// Generate realistic initial balances (enough for trading)
 		var price, quantity int64
-
 		if role == zerocash.BUY {
-			// Determine if this buyer qualifies
-			isQualified := (buyerCount - 1) < numQualifiedBuyers
-
-			if isQualified {
-				// Qualified buyer: bid at or above clearing price
-				priceOffset := int64((buyerCount - 1) * 3) // Spread: 45, 48, 51, 54, ...
-				price = clearingPrice + priceOffset
-				quantity = qualifiedBuyerQuantity
-			} else {
-				// Unqualified buyer: bid below clearing price
-				unqualifiedOffset := int64((buyerCount - numQualifiedBuyers) * 2)
-				price = clearingPrice - unqualifiedOffset - 1 // Below clearing: 44, 42, 40, ...
-				quantity = baseQuantity
-			}
+			price = buyerPrices[buyerCount-1]
+			quantity = buyerQuantities[buyerCount-1]
 		} else {
-			// Determine if this seller qualifies
-			isQualified := (sellerCount - 1) < numQualifiedSellers
-
-			if isQualified {
-				// Qualified seller: ask at or below clearing price
-				priceOffset := int64((sellerCount - 1) * 3) // Spread: 45, 42, 39, 36, ...
-				price = clearingPrice - priceOffset
-				quantity = qualifiedSellerQuantity
-
-				// Handle remainder distribution: first few sellers get +1 extra quantity
-				if numQualifiedSellers > 0 {
-					remainder := totalQualifiedDemand % int64(numQualifiedSellers)
-					sellerIndex := sellerCount - 1
-					if int64(sellerIndex) < remainder {
-						quantity += 1 // This seller gets extra unit to balance remainder
-					}
-				}
-			} else {
-				// Unqualified seller: ask above clearing price
-				unqualifiedOffset := int64((sellerCount - numQualifiedSellers) * 2)
-				price = clearingPrice + unqualifiedOffset + 1 // Above clearing: 46, 48, 50, ...
-				quantity = baseQuantity
-			}
+			price = sellerPrices[sellerCount-1]
+			quantity = sellerQuantities[sellerCount-1]
 		}
+
+		// Ensure sufficient funds for trading
+		requiredCoins := price * quantity * 2                            // Double the required amount for safety
+		initialCoins[i] = 1000 + requiredCoins + int64(mrand.Intn(1000)) // Random base + required + buffer
+		initialEnergy[i] = 50 + quantity*2 + int64(mrand.Intn(100))      // Enough energy for trading
 
 		orders[i] = zerocash.EnergyOrder{
 			Type:     role,
@@ -226,7 +294,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		}
 	}
 
-	// *** VERIFICATION: Ensure perfect intersection ***
+	// *** FINAL VERIFICATION: Ensure perfect intersection ***
 	var verifyQualifiedDemand, verifyQualifiedSupply int64
 	for i := 0; i < n; i++ {
 		if roles[i] == zerocash.BUY && orders[i].Price.Int64() >= clearingPrice {
@@ -237,7 +305,8 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		}
 	}
 
-	fmt.Printf("   ✅ Perfect Intersection Verification: Demand=%d, Supply=%d (Equal: %t)\n",
+	fmt.Printf("   🎯 Clearing Price: %d\n", clearingPrice)
+	fmt.Printf("   ✅ Final Verification: Qualified Demand=%d, Qualified Supply=%d (Equal: %t)\n",
 		verifyQualifiedDemand, verifyQualifiedSupply, verifyQualifiedDemand == verifyQualifiedSupply)
 
 	if verifyQualifiedDemand != verifyQualifiedSupply {
@@ -247,7 +316,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 
 	return MarketConfig{
 		NumParticipants: n,
-		AuctionType:     "perfect-intersection-double-auction",
+		AuctionType:     "random-perfect-intersection-double-auction",
 		Roles:           roles,
 		InitialCoins:    initialCoins,
 		InitialEnergy:   initialEnergy,
@@ -371,15 +440,16 @@ func main() {
 	fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)")
 	fmt.Println("================================================")
 	fmt.Printf("Configuration: N=%d participants, %.1f%% buyers\n", numParticipants, buyerRatio*100)
+	fmt.Println("🎲 Generating RANDOM scenario with perfect vertical intersection")
 	fmt.Println()
 
 	startTime := time.Now()
 
-	// STEP 1: Configure market scenario
-	config := createMarketConfigForN(numParticipants, buyerRatio) // Dynamic scaling based on flags
-	// Uncomment to try different scenarios for benchmarking:
+	// STEP 1: Configure RANDOM market scenario
+	config := createMarketConfigForN(numParticipants, buyerRatio) // Random scenario with perfect intersection
+	// Alternative scenarios (commented out - use random scenario instead):
+	// config := createDefaultMarketConfig()        // N=10 participants (old fixed scenario)
 	// config := createMarketConfig5Participants()  // N=5 participants
-	// config := createDefaultMarketConfig()        // N=10 participants
 	// config := createMarketConfig15Participants() // N=15 participants
 	// config := createMarketConfig20Participants() // N=20 participants
 	// config := createMarketConfig25Participants() // N=25 participants
@@ -387,11 +457,6 @@ func main() {
 	// config := createLowSupplyScenario()
 	// config := createEmergencyScenario()
 	// config := createTestingScenario()
-
-	// DYNAMIC SCALING: Use this for any number of participants with flexible buyer/seller ratios
-	// config := createMarketConfigForN(50, 0.6)   // N=50 participants, 60% buyers
-	// config := createMarketConfigForN(100, 0.3)  // N=100 participants, 30% buyers
-	// config := createMarketConfigForN(7, 0.43)   // N=7 participants, ~43% buyers (3 buyers, 4 sellers)
 
 	// Validate configuration
 	if err := validateConfig(config); err != nil {
