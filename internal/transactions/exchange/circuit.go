@@ -1,12 +1,10 @@
 // circuit.go - Circuit for the auction phase (exchange) of the protocol.
 //
 // This file defines the zero-knowledge circuit for the auction (exchange) phase of the PPEM protocol.
-// It enforces cryptographic consistency (decryption, PRF, commitments, EC operations) and basic auction constraints.
+// It enforces cryptographic consistency (decryption, PRF, commitments, EC operations) only.
+// Auction logic and constraints are handled outside the circuit.
 //
-// Auction constraints:
-// - First N/2 participants are buyers (sorted descending by bid)
-// - Last N/2 participants are sellers (sorted ascending by ask)
-// - DecVal[i][2] contains the bid/ask price for participant i
+// Note: DecVal[i][2] contains the bid/ask price for participant i (for reference, not verified)
 
 package exchange
 
@@ -86,7 +84,8 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 }
 
 // CircuitTxFN represents a dynamic circuit for N coins/participants in the auction phase.
-// This circuit can be generated for any number of participants (N must be even).
+// This circuit can be generated for any number of participants.
+// The circuit only verifies cryptographic consistency - auction logic is handled externally.
 //
 // Fields:
 //   - N: number of participants
@@ -95,19 +94,10 @@ func PRF(api frontend.API, sk, rho frontend.Variable) frontend.Variable {
 //   - C, DecVal: encrypted and decrypted registration data
 //   - R, G, G_b, G_r, EncKey: Diffie-Hellman parameters for each participant
 //
-// Auction structure:
-//   - First N/2 participants are buyers (indices 0 to N/2-1)
-//   - Last N/2 participants are sellers (indices N/2 to N-1)
-//   - DecVal[i][2] is the bid (buyers) or ask (sellers)
+// Note: DecVal[i][2] contains bid/ask data but is not verified by the circuit
 type CircuitTxFN struct {
-	// Number of participants this circuit supports (must be even)
+	// Number of participants this circuit supports
 	N int
-
-	// ----- Auction Parameters (Public) -----
-	ClearingPrice       frontend.Variable `gnark:",public"` // Auction clearing price
-	CommissionPerUnit   frontend.Variable `gnark:",public"` // Commission per energy unit
-	MarginalBuyerPrice  frontend.Variable `gnark:",public"` // Marginal buyer price (for Euclidean division)
-	MarginalSellerPrice frontend.Variable `gnark:",public"` // Marginal seller price (for Euclidean division)
 
 	// ParticipantRoles and TradedQuantities are now decrypted from registration data:
 	// - ParticipantRoles: DecVal[i][5] (0=BUY, 1=SELL)
@@ -149,14 +139,11 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 		panic("CircuitTxFN: N must be positive")
 	}
 
-	// Auction logic runs outside the circuit
+	// Auction logic runs outside the circuit - no auction verification in ZKP
 
 	circuit := &CircuitTxFN{
 		N: n,
 
-		// Initialize auction parameter arrays
-		// ParticipantRoles: make([]frontend.Variable, n), // Removed
-		// TradedQuantities: make([]frontend.Variable, n), // Removed
 		// Initialize arrays with proper sizes
 		InCoin:   make([]frontend.Variable, n),
 		InEnergy: make([]frontend.Variable, n),
@@ -197,21 +184,15 @@ func NewCircuitTxFN(n int) *CircuitTxFN {
 // Define implements the circuit verification logic for PPEM transactions.
 func (c *CircuitTxFN) Define(api frontend.API) error {
 	// Verify basic cryptographic constraints for all participants
-	if err := c.verifyBasicCrypto(api); err != nil {
+	if err := c.verifyDefaultAssertions(api); err != nil {
 		return err
 	}
-
-	// Step 1: Verify participant list is properly sorted
-	c.verifySorting(api)
-
-	// Step 2: Verify Euclidean division formula (commission calculation)
-	c.verifyEuclideanDivision(api)
 
 	return nil
 }
 
-// verifyBasicCrypto verifies the basic cryptographic constraints for all participants
-func (c *CircuitTxFN) verifyBasicCrypto(api frontend.API) error {
+// verifyDefaultAssertions verifies the basic cryptographic constraints for all participants
+func (c *CircuitTxFN) verifyDefaultAssertions(api frontend.API) error {
 	// Process all N coins using a for loop
 	for coin := 0; coin < c.N; coin++ {
 		// --- Decrypt and verify the registration data ---
@@ -254,66 +235,4 @@ func (c *CircuitTxFN) verifyBasicCrypto(api frontend.API) error {
 		api.AssertIsEqual(c.InPk[coin], pk)
 	}
 	return nil
-}
-
-// verifySorting verifies that participants are properly sorted:
-// - Buyers in descending order by bid
-// - Sellers in ascending order by ask
-// - All buyers come before all sellers
-func (c *CircuitTxFN) verifySorting(api frontend.API) {
-	// Verify sorting using simple consecutive checks
-	// Assumption: Auctioneer provides buyers first (descending), then sellers (ascending)
-	for i := 0; i < c.N-1; i++ {
-		currentRole := c.DecVal[i][5] // Use DecVal[i][5] for role (0=BUY, 1=SELL)
-		nextRole := c.DecVal[i+1][5]  // Use DecVal[i+1][5] for role (0=BUY, 1=SELL)
-
-		// Check if current participant is buyer (role == 0)
-		currentIsBuyer := api.IsZero(currentRole)
-		// Check if next participant is buyer (role == 0)
-		nextIsBuyer := api.IsZero(nextRole)
-
-		// Check if current participant is seller (role == 1)
-		// We do this by: (role == 1) ≡ (role != 0) AND (role * (role - 1) == 0)
-		// Since role can only be 0 or 1, we use: isSeller = (1 - isBuyer)
-		currentIsSeller := api.Sub(1, currentIsBuyer)
-		nextIsSeller := api.Sub(1, nextIsBuyer)
-
-		// Verify role constraint: each role must be either 0 or 1
-		// role * (role - 1) = 0 ensures role ∈ {0, 1}
-		roleConstraintCurrent := api.Mul(currentRole, api.Sub(currentRole, 1))
-		api.AssertIsEqual(roleConstraintCurrent, 0)
-		roleConstraintNext := api.Mul(nextRole, api.Sub(nextRole, 1))
-		api.AssertIsEqual(roleConstraintNext, 0)
-
-		// If both consecutive participants are buyers (role=0): verify descending order
-		bothBuyers := api.Mul(currentIsBuyer, nextIsBuyer)
-		buyerConstraint := api.Mul(bothBuyers, c.DecVal[i+1][2]) // next_price * flag
-		buyerLimit := api.Mul(bothBuyers, c.DecVal[i][2])        // current_price * flag
-		api.AssertIsLessOrEqual(buyerConstraint, buyerLimit)     // next <= current when both buyers
-
-		// If both consecutive participants are sellers (role=1): verify ascending order
-		bothSellers := api.Mul(currentIsSeller, nextIsSeller)
-		sellerConstraint := api.Mul(bothSellers, c.DecVal[i][2]) // current_price * flag
-		sellerLimit := api.Mul(bothSellers, c.DecVal[i+1][2])    // next_price * flag
-		api.AssertIsLessOrEqual(sellerConstraint, sellerLimit)   // current <= next when both sellers
-
-		// Ensure buyers come before sellers (no seller followed by buyer)
-		// invalidOrder = currentIsSeller AND nextIsBuyer
-		invalidOrder := api.Mul(currentIsSeller, nextIsBuyer)
-		api.AssertIsEqual(invalidOrder, 0) // seller->buyer transition not allowed
-	}
-}
-
-// verifyEuclideanDivision verifies the commission calculation using Euclidean division
-// Formula: MarginalBuyerPrice + MarginalSellerPrice = 2 × ClearingPrice + CommissionPerUnit
-func (c *CircuitTxFN) verifyEuclideanDivision(api frontend.API) {
-	// Verify: MarginalBuyerPrice + MarginalSellerPrice = 2 × ClearingPrice + CommissionPerUnit
-	marginalSum := api.Add(c.MarginalBuyerPrice, c.MarginalSellerPrice)
-	clearingTimesTwo := api.Mul(c.ClearingPrice, 2)
-	expectedSum := api.Add(clearingTimesTwo, c.CommissionPerUnit)
-	api.AssertIsEqual(marginalSum, expectedSum)
-
-	// Ensure CommissionPerUnit is either 0 or 1 (valid remainder for division by 2)
-	commissionCheck := api.Mul(c.CommissionPerUnit, api.Sub(c.CommissionPerUnit, 1))
-	api.AssertIsEqual(commissionCheck, 0)
 }

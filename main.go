@@ -109,7 +109,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		numBuyers = n - 1
 	}
 
-	fmt.Printf("🎯 Random Perfect Intersection Market: %d buyers, %d sellers (%.1f%% buyers)\n",
+	fmt.Printf("Random perfect intersection market: %d buyers, %d sellers (%.1f%% buyers)\n", 
 		numBuyers, numSellers, buyerRatio*100)
 
 	// *** RANDOM PERFECT INTERSECTION STRATEGY ***
@@ -154,7 +154,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		maxQualifiedSellers = 1
 	}
 
-	fmt.Printf("   🎯 Auction participation: %d/%d buyers, %d/%d sellers will qualify\n",
+	fmt.Printf("   Auction participation: %d/%d buyers, %d/%d sellers will qualify\n", 
 		maxQualifiedBuyers, numBuyers, maxQualifiedSellers, numSellers)
 
 	// Calculate qualified supply and demand
@@ -168,7 +168,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		totalQualifiedSupply += sellerQuantities[i]
 	}
 
-	fmt.Printf("   📊 Initial qualified quantities: Supply=%d, Demand=%d\n", totalQualifiedSupply, totalQualifiedDemand)
+	fmt.Printf("   Initial qualified quantities: supply=%d, demand=%d\n", totalQualifiedSupply, totalQualifiedDemand)
 
 	// *** PERFECT INTERSECTION ADJUSTMENT FOR QUALIFIED PARTICIPANTS ONLY ***
 	// Adjust qualified quantities to ensure supply = demand exactly
@@ -214,7 +214,7 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		totalQualifiedSupply += sellerQuantities[i]
 	}
 
-	fmt.Printf("   ✅ Perfect Intersection (qualified only): Supply=%d, Demand=%d (Equal: %t)\n",
+	fmt.Printf("   Perfect intersection (qualified only): supply=%d, demand=%d (equal: %t)\n", 
 		totalQualifiedSupply, totalQualifiedDemand, totalQualifiedSupply == totalQualifiedDemand)
 
 	// Generate random prices with proper qualification structure
@@ -305,8 +305,8 @@ func createMarketConfigForN(n int, buyerRatio float64) MarketConfig {
 		}
 	}
 
-	fmt.Printf("   🎯 Clearing Price: %d\n", clearingPrice)
-	fmt.Printf("   ✅ Final Verification: Qualified Demand=%d, Qualified Supply=%d (Equal: %t)\n",
+	fmt.Printf("   Clearing price: %d\n", clearingPrice)
+	fmt.Printf("   Final verification: qualified demand=%d, qualified supply=%d (equal: %t)\n", 
 		verifyQualifiedDemand, verifyQualifiedSupply, verifyQualifiedDemand == verifyQualifiedSupply)
 
 	if verifyQualifiedDemand != verifyQualifiedSupply {
@@ -422,48 +422,49 @@ func main() {
 	// Parse command-line flags
 	var numParticipants int
 	var buyerRatio float64
-	flag.IntVar(&numParticipants, "n", 10, "Number of participants (any positive integer, default: 10)")
-	flag.Float64Var(&buyerRatio, "buyer-ratio", 0.5, "Fraction of participants that should be buyers (0.0 to 1.0, default: 0.5)")
+	var verbose bool
+	var quiet bool
+	flag.IntVar(&numParticipants, "n", 10, "Number of participants (positive integer)")
+	flag.Float64Var(&buyerRatio, "buyer-ratio", 0.5, "Fraction of participants who are buyers (0.0 to 1.0)")
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
+	flag.BoolVar(&quiet, "quiet", false, "Suppress informational output")
 	flag.Parse()
+
+	if quiet {
+		log.SetOutput(os.Stdout)
+		log.SetFlags(0)
+	} else if verbose {
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	} else {
+		log.SetFlags(0)
+	}
 
 	// Validate input parameters
 	if numParticipants <= 0 {
 		fmt.Printf("Error: Number of participants must be positive, got %d\n", numParticipants)
 		os.Exit(1)
 	}
-
 	if buyerRatio < 0.0 || buyerRatio > 1.0 {
 		fmt.Printf("Error: Buyer ratio must be between 0.0 and 1.0, got %.2f\n", buyerRatio)
 		os.Exit(1)
 	}
 
-	fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)")
-	fmt.Println("================================================")
-	fmt.Printf("Configuration: N=%d participants, %.1f%% buyers\n", numParticipants, buyerRatio*100)
-	fmt.Println("🎲 Generating RANDOM scenario with perfect vertical intersection")
-	fmt.Println()
+	if !quiet { fmt.Println("Privacy-Preserving Energy Market Protocol (PPEM)") }
+	if !quiet { fmt.Println("Configuration:", fmt.Sprintf("N=%d, buyers=%.1f%%", numParticipants, buyerRatio*100)) }
+	if verbose { log.Println("Generating random scenario with perfect intersection") }
 
 	startTime := time.Now()
 
-	// STEP 1: Configure RANDOM market scenario
-	config := createMarketConfigForN(numParticipants, buyerRatio) // Random scenario with perfect intersection
-	// Alternative scenarios (commented out - use random scenario instead):
-	// config := createDefaultMarketConfig()        // N=10 participants (old fixed scenario)
-	// config := createMarketConfig5Participants()  // N=5 participants
-	// config := createMarketConfig15Participants() // N=15 participants
-	// config := createMarketConfig20Participants() // N=20 participants
-	// config := createMarketConfig25Participants() // N=25 participants
-	// config := createHighDemandScenario()
-	// config := createLowSupplyScenario()
-	// config := createEmergencyScenario()
-	// config := createTestingScenario()
+	// STEP 1: Configure market scenario
+	config := createMarketConfigForN(numParticipants, buyerRatio)
 
 	// Validate configuration
 	if err := validateConfig(config); err != nil {
 		log.Fatalf("Invalid market configuration: %v", err)
 	}
 
-	// STEP 2: Initialize protocol state with configuration
+	// PHASE 0: SETUP
+	if !quiet { fmt.Println("SETUP PHASE") }
 	state := &ProtocolState{
 		Config:             config,
 		Participants:       make([]*zerocash.Participant, config.NumParticipants),
@@ -480,41 +481,33 @@ func main() {
 		RegistrationProofs: make([][]byte, config.NumParticipants),
 		WithdrawalResults:  make([]bool, config.NumParticipants),
 	}
-
-	// PHASE 0: SETUP
-	fmt.Println("SETUP PHASE")
-	fmt.Println("===========")
 	if err := setupProtocol(state); err != nil {
 		log.Fatalf("Setup failed: %v", err)
 	}
 
 	// PHASE 1: REGISTRATION
-	fmt.Println("\nREGISTRATION PHASE")
-	fmt.Println("==================")
+	if !quiet { fmt.Println("\nREGISTRATION PHASE") }
 	if err := executeRegistrationPhase(state); err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
 
 	// PHASE 2: EXCHANGE
-	fmt.Println("\nEXCHANGE PHASE")
-	fmt.Println("==============")
+	if !quiet { fmt.Println("\nEXCHANGE PHASE") }
 	if err := executeExchangePhase(state); err != nil {
 		log.Fatalf("Exchange failed: %v", err)
 	}
 
 	// PHASE 3: FINALIZATION
-	fmt.Println("\nFINALIZATION PHASE")
-	fmt.Println("==================")
+	if !quiet { fmt.Println("\nFINALIZATION PHASE") }
 	if err := executeFinalizationPhase(state); err != nil {
 		log.Fatalf("Finalization failed: %v", err)
 	}
 
 	// PHASE 4: WITHDRAWAL
-	fmt.Println("\nWITHDRAWAL PHASE")
-	fmt.Println("================")
+	if !quiet { fmt.Println("\nWITHDRAWAL PHASE") }
 	executeWithdrawalDemo(state)
 
-	// PROTOCOL SUMMARY
+	// SUMMARY
 	totalTime := time.Since(startTime)
 	printProtocolSummary(state, totalTime)
 }
@@ -780,12 +773,11 @@ func executeExchangePhase(state *ProtocolState) error {
 			// Create plot configuration
 			config := exchange.DefaultPlotConfig()
 			config.OutputPath = fmt.Sprintf("%s/%s.png", graphsDir, plotTitle)
-			config.Title = fmt.Sprintf("N=%d (%d buyers, %d sellers) | Clearing: %v | Commission: %v | Traded: %d units",
+							config.Title = fmt.Sprintf("N=%d (%d buyers, %d sellers) | Clearing: %v | Traded: %d units",
 				state.Config.NumParticipants,
 				countBuyers(state.Config.Roles),
 				countSellers(state.Config.Roles),
 				compositeResult.AuctionExecution.ClearingPrice,
-				compositeResult.AuctionExecution.AuctioneerCommission,
 				compositeResult.AuctionExecution.TotalEnergyTraded)
 
 			// Create inputs array for plotting (reconstruct from exchange data)
@@ -811,7 +803,7 @@ func executeExchangePhase(state *ProtocolState) error {
 			} else {
 				fmt.Printf("✅ Auction graph saved: %s\n", config.OutputPath)
 				fmt.Printf("   📊 Verify clearing price: %v coins/unit\n", compositeResult.AuctionExecution.ClearingPrice)
-				fmt.Printf("   💰 Verify commission: %v coins\n", compositeResult.AuctionExecution.AuctioneerCommission)
+				// Commission removed
 				fmt.Printf("   📈 Verify volume: %d energy units\n", compositeResult.AuctionExecution.TotalEnergyTraded)
 			}
 
@@ -827,7 +819,7 @@ func executeExchangePhase(state *ProtocolState) error {
 				} else {
 					fmt.Printf("📄 Exchange mapping saved: %s/%s\n", exportDir, jsonFilename)
 					fmt.Printf("   🔍 Use this file to verify all exchange calculations\n")
-					fmt.Printf("   📋 Contains: before/after states, trades, conservation, Euclidean division\n")
+					fmt.Printf("   📋 Contains: before/after states, trades, conservation\n")
 				}
 			}
 		}
@@ -837,63 +829,24 @@ func executeExchangePhase(state *ProtocolState) error {
 	fmt.Println("  - Creating output transactions...")
 
 	outputTxs := make([]*zerocash.Tx, 0)
-	var auctioneerCommission *big.Int = big.NewInt(0)
 
 	if exchangeResult, ok := exchangeTx.(*exchange.ExchangeTransaction); ok {
-		// Extract auctioneer commission from the composite result
-		if compositeResult, ok := auctionInfo.(struct {
-			AuctionResult    *exchange.AuctionResult
-			AuctionExecution *exchange.AuctionExecutionResult
-		}); ok {
-			// Get commission directly from auction execution result
-			auctioneerCommission = compositeResult.AuctionExecution.AuctioneerCommission
-		}
-
 		// Create participant output transactions
 		for i, output := range exchangeResult.Outputs {
 			if i < len(state.RegistrationTxs) && output.Coins != nil && output.Energy != nil {
-				// Create real output note for participant with proper cryptography
 				participantOutputNote := zerocash.NewNote(output.Coins, output.Energy, state.BaseNoteKeys[i])
-
-				// Create output transaction using real cryptographic data
 				outputTx := &zerocash.Tx{
-					SnOld:     state.RegistrationTxs[i].SnOld,   // Serial number from input note
-					CmNew:     string(participantOutputNote.Cm), // Real commitment (not dummy)
+					SnOld:     state.RegistrationTxs[i].SnOld,
+					CmNew:     string(participantOutputNote.Cm),
 					OldCoin:   state.RegistrationTxs[i].OldCoin,
 					OldEnergy: state.RegistrationTxs[i].OldEnergy,
 					NewCoin:   output.Coins.String(),
 					NewEnergy: output.Energy.String(),
-					Proof:     exchangeProof, // Same proof for all (batch verification)
+					Proof:     exchangeProof,
 				}
 				outputTxs = append(outputTxs, outputTx)
 			}
 		}
-
-		// Create auctioneer commission transaction with proper cryptography
-
-		// Generate auctioneer secret key for notes (32 bytes)
-		auctioneerSecretKey := zerocash.RandomBytesPublic(32)
-
-		// Create auctioneer input note (starts with 0 coins, 0 energy)
-		auctioneerInputNote := zerocash.NewNote(big.NewInt(0), big.NewInt(0), auctioneerSecretKey)
-
-		// Create auctioneer output note (receives commission)
-		auctioneerOutputNote := zerocash.NewNote(auctioneerCommission, big.NewInt(0), auctioneerSecretKey)
-
-		// Compute real serial number from input note (following zerocash protocol)
-		auctioneerSerialNumber := zerocash.SerialNumber(auctioneerSecretKey, auctioneerInputNote.Rho)
-
-		auctioneerTx := &zerocash.Tx{
-			SnOld:     string(auctioneerSerialNumber),             // Real serial number
-			CmNew:     string(auctioneerOutputNote.Cm),            // Real commitment
-			OldCoin:   auctioneerInputNote.Value.Coins.String(),   // Real input (0)
-			OldEnergy: auctioneerInputNote.Value.Energy.String(),  // Real input (0)
-			NewCoin:   auctioneerOutputNote.Value.Coins.String(),  // Real output (commission)
-			NewEnergy: auctioneerOutputNote.Value.Energy.String(), // Real output (0)
-			Proof:     exchangeProof,                              // Same proof
-		}
-		outputTxs = append(outputTxs, auctioneerTx)
-		fmt.Printf("💰 Created auctioneer commission transaction: %v coins\n", auctioneerCommission)
 	}
 
 	// Transition ledger to exchange phase before submitting results

@@ -65,7 +65,7 @@
 <path d="M36.385,38.613L36.385,413.17" style="fill:none;stroke:#000000;stroke-width:0.5" />
 <path d="M43.135,413.17L219.09,413.17L219.09,288.32L430.24,288.32L430.24,163.47L571,163.47" style="fill:none;stroke:#F15A60;stroke-width:2" />
 <path d="M43.135,38.613L483.02,38.613" style="fill:none;stroke:#7AC36A;stroke-width:2" />
-<path d="M43.135,88.555L571,88.555" style="fill:none;stroke:#5A9BD4;stroke-width:2;stroke-dasharray:5,5" />
+<path d="M43.135,213.41L571,213.41" style="fill:none;stroke:#5A9BD4;stroke-width:2;stroke-dasharray:5,5" />
 <path d="M556,63.072L576,63.072" style="fill:none;stroke:#F15A60;stroke-width:2" />
 <text x="467.36" y="-60.585" transform="scale(1, -1)"
 	style="font-family:Liberation Serif;font-variant:normal;font-weight:normal;font-style:normal;font-size:12px">Demand (Buyers)</text>
@@ -74,6 +74,6 @@
 	style="font-family:Liberation Serif;font-variant:normal;font-weight:normal;font-style:normal;font-size:12px">Supply (Sellers)</text>
 <path d="M556,42.705L576,42.705" style="fill:none;stroke:#5A9BD4;stroke-width:2;stroke-dasharray:5,5" />
 <text x="465.69" y="-40.218" transform="scale(1, -1)"
-	style="font-family:Liberation Serif;font-variant:normal;font-weight:normal;font-style:normal;font-size:12px">Clearing Price: 47</text>
+	style="font-family:Liberation Serif;font-variant:normal;font-weight:normal;font-style:normal;font-size:12px">Clearing Price: 52</text>
 </g>
 </svg>

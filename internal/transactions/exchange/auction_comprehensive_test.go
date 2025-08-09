@@ -137,20 +137,18 @@ func TestComprehensiveAuctionScenarios(t *testing.T) {
 			// Log initial state
 			logInitialState(t, inputs, roles)
 
-			// Generate auctioneer secret key
-			auctioneerSk := big.NewInt(int64(12345 + len(scenario.name))) // Deterministic but unique per scenario
+			// Auctioneer secret key no longer needed
 
-			// Execute auction
-			result := RunAuctionLogicWithCommissionAndAuctioneer(inputs, roles, auctioneerSk)
+			// Execute auction (uniform, no commission)
+			result := RunAuctionLogicUniform(inputs, roles)
 
 			// Verify basic auction properties
 			verifyAuctionResult(t, result, scenario.expectedTrade)
 
-			// CRITICAL: Verify conservation laws (N inputs → N+1 outputs)
+			// CRITICAL: Verify conservation laws (N inputs → N outputs)
 			verifyConservationLaws(t, inputs, result, scenario.name)
 
-			// Verify auctioneer note cryptographic rigor
-			verifyAuctioneerNoteRigor(t, result, auctioneerSk)
+			// Auctioneer note removed (no commission)
 
 			// Generate visualization plot for this scenario
 			generateScenarioPlot(t, scenario, inputs, result, roles)
@@ -209,7 +207,6 @@ func createScenarioInputs(buyers, sellers []ParticipantData) ([]DecryptedRegistr
 // verifyAuctionResult verifies basic auction execution properties
 func verifyAuctionResult(t *testing.T, result *AuctionExecutionResult, expectedTrade bool) {
 	require.NotNil(t, result, "Auction result must not be nil")
-	require.NotNil(t, result.AuctioneerNote, "Auctioneer note must exist")
 
 	if expectedTrade {
 		assert.Greater(t, result.TotalEnergyTraded, int64(0), "Energy should be traded in this scenario")
@@ -234,67 +231,32 @@ func verifyConservationLaws(t *testing.T, inputs []DecryptedRegistration, result
 	}
 
 	// Calculate total participant outputs
-	var totalParticipantOutputCoins, totalParticipantOutputEnergy int64
+	var totalOutputCoins, totalOutputEnergy int64
 	for _, output := range result.Outputs {
-		totalParticipantOutputCoins += output.Coins.Int64()
-		totalParticipantOutputEnergy += output.Energy.Int64()
+		totalOutputCoins += output.Coins.Int64()
+		totalOutputEnergy += output.Energy.Int64()
 	}
 
-	// Add auctioneer output
-	auctioneerCoins := result.AuctioneerNote.Coins.Int64()
-	auctioneerEnergy := result.AuctioneerNote.Energy.Int64()
-
-	totalOutputCoins := totalParticipantOutputCoins + auctioneerCoins
-	totalOutputEnergy := totalParticipantOutputEnergy + auctioneerEnergy
-
-	// Verify conservation laws
+	// Verify conservation laws (participants only)
 	assert.Equal(t, totalInputCoins, totalOutputCoins,
-		"[%s] COIN CONSERVATION: Total input coins (%d) must equal total output coins (%d + %d)",
-		scenarioName, totalInputCoins, totalParticipantOutputCoins, auctioneerCoins)
+		"[%s] COIN CONSERVATION: Total input coins (%d) must equal total output coins (%d)",
+		scenarioName, totalInputCoins, totalOutputCoins)
 
 	assert.Equal(t, totalInputEnergy, totalOutputEnergy,
-		"[%s] ENERGY CONSERVATION: Total input energy (%d) must equal total output energy (%d + %d)",
-		scenarioName, totalInputEnergy, totalParticipantOutputEnergy, auctioneerEnergy)
+		"[%s] ENERGY CONSERVATION: Total input energy (%d) must equal total output energy (%d)",
+		scenarioName, totalInputEnergy, totalOutputEnergy)
 
-	// Verify output count: N inputs → N+1 outputs
-	expectedOutputCount := len(inputs) + 1 // N participants + 1 auctioneer
-	actualOutputCount := result.GetTotalOutputCount()
+	// Verify output count: N inputs → N outputs
+	expectedOutputCount := len(inputs)
+	actualOutputCount := len(result.Outputs)
 	assert.Equal(t, expectedOutputCount, actualOutputCount,
-		"[%s] OUTPUT COUNT: Expected %d outputs (N+1), got %d",
+		"[%s] OUTPUT COUNT: Expected %d outputs (N), got %d",
 		scenarioName, expectedOutputCount, actualOutputCount)
 
-	t.Logf("✅ [%s] Conservation verified: %d inputs → %d outputs", scenarioName, len(inputs), actualOutputCount)
-	t.Logf("   💰 Coins: %d input = %d participant + %d auctioneer", totalInputCoins, totalParticipantOutputCoins, auctioneerCoins)
-	t.Logf("   ⚡ Energy: %d input = %d participant + %d auctioneer", totalInputEnergy, totalParticipantOutputEnergy, auctioneerEnergy)
+	t.Logf("[%s] Conservation verified: %d inputs -> %d outputs", scenarioName, len(inputs), actualOutputCount)
 }
 
-// verifyAuctioneerNoteRigor verifies the auctioneer note has proper cryptographic structure
-func verifyAuctioneerNoteRigor(t *testing.T, result *AuctionExecutionResult, auctioneerSk *big.Int) {
-	require.NotNil(t, result.AuctioneerNote.NoteData, "Auctioneer must have actual zerocash.Note")
-
-	note := result.AuctioneerNote.NoteData
-
-	// Verify cryptographic structure
-	assert.NotNil(t, note.Value, "Note must have Value")
-	assert.NotNil(t, note.PkOwner, "Note must have PkOwner")
-	assert.Equal(t, 32, len(note.Rho), "Rho must be 32 bytes")
-	assert.Equal(t, 32, len(note.Rand), "Rand must be 32 bytes")
-	assert.NotNil(t, note.Cm, "Note must have commitment")
-
-	// Verify values are consistent
-	assert.Equal(t, result.AuctioneerNote.Coins, note.Value.Coins, "Commission must match between structures")
-	assert.Equal(t, big.NewInt(0), note.Value.Energy, "Auctioneer energy must be 0")
-
-	// Verify commitment computation
-	expectedCm := zerocash.Commitment(
-		note.Value.Coins,
-		note.Value.Energy,
-		note.PkOwner,
-		new(big.Int).SetBytes(note.Rho),
-		new(big.Int).SetBytes(note.Rand),
-	)
-	assert.Equal(t, expectedCm, note.Cm, "Commitment must be correctly computed")
-}
+// Auctioneer note rigor test removed (no commission)
 
 // generateScenarioPlot creates a supply/demand plot for the scenario
 func generateScenarioPlot(t *testing.T, scenario struct {
@@ -397,7 +359,7 @@ func generateScenarioPlot(t *testing.T, scenario struct {
 	err := p.Save(8*vg.Inch, 6*vg.Inch, filename)
 	require.NoError(t, err)
 
-	t.Logf("✅ Plot saved: %s", filename)
+	t.Logf("Plot saved: %s", filename)
 }
 
 // logInitialState logs the initial state of all participants
@@ -419,7 +381,7 @@ func logInitialState(t *testing.T, inputs []DecryptedRegistration, roles map[int
 			i, role.String(), input.Price, input.Quantity, input.Coins, input.Energy)
 	}
 
-	t.Logf("📊 Initial Market State:")
+	t.Logf("Initial market state:")
 	t.Logf("   👥 Participants: %d total (%d buyers, %d sellers)", len(inputs), buyerCount, sellerCount)
 	t.Logf("   💰 Total Coins: %d", totalCoins)
 	t.Logf("   ⚡ Total Energy: %d", totalEnergy)
@@ -435,17 +397,10 @@ func logFinalResults(t *testing.T, scenario struct {
 	expectedCommissionPerUnit int64
 }, result *AuctionExecutionResult, totalParticipants int) {
 
-	t.Logf("🎯 Final Results for %s:", scenario.name)
-	t.Logf("   📈 Trading: %v (expected: %v)", result.TotalEnergyTraded > 0, scenario.expectedTrade)
-	t.Logf("   💰 Clearing Price: %v", result.ClearingPrice)
+	t.Logf("Final results for %s:", scenario.name)
+	t.Logf("   Trading: %v (expected: %v)", result.TotalEnergyTraded > 0, scenario.expectedTrade)
+	t.Logf("   Clearing price: %v", result.ClearingPrice)
 	t.Logf("   🔄 Energy Traded: %d units", result.TotalEnergyTraded)
-	t.Logf("   💸 Commission: %v total (%v per unit)", result.AuctioneerCommission,
-		func() int64 {
-			if result.TotalEnergyTraded > 0 {
-				return result.AuctioneerCommission.Int64() / result.TotalEnergyTraded
-			}
-			return 0
-		}())
 	t.Logf("   🎭 Participants: %d qualified buyers, %d qualified sellers", result.QualifiedBuyers, result.QualifiedSellers)
-	t.Logf("   🏗️  Outputs: %d total (%d participants + 1 auctioneer)", result.GetTotalOutputCount(), totalParticipants)
+	t.Logf("   🏗️  Outputs: %d total (%d participants)", len(result.Outputs), totalParticipants)
 }

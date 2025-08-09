@@ -325,123 +325,19 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 		}
 	}
 
-	// Add Euclidean division calculation visualization with actual marginal prices
-	if auctionResult.ClearingPrice != nil && auctionResult.AuctioneerCommission != nil {
-		clearingPrice := auctionResult.ClearingPrice.Int64()
-		commissionPerUnit := int64(0)
-		if auctionResult.TotalEnergyTraded > 0 {
-			commissionPerUnit = auctionResult.AuctioneerCommission.Int64() / auctionResult.TotalEnergyTraded
-		}
-
-		// Calculate the MATHEMATICALLY CORRECT marginal prices
-		// If clearing price = C and commission per unit = R, then marginalBuyer + marginalSeller = 2C + R
-		requiredSum := 2*clearingPrice + commissionPerUnit
-
-		// For display, split this sum reasonably between buyer and seller
-		// Buyer gets the larger share if odd remainder
-		marginalBuyerPrice := (requiredSum + 1) / 2
-		marginalSellerPrice := requiredSum / 2
-
-		originalTitle := p.Title.Text
-		p.Title.Text = fmt.Sprintf("%s\nEuclidean Division: (%d + %d) = 2×%d + %d",
-			originalTitle, marginalBuyerPrice, marginalSellerPrice, clearingPrice, commissionPerUnit)
-
-		// Add horizontal asymptote lines for marginal prices
-		maxQuantity := float64(0)
-		if len(buyers) > 0 && buyers[len(buyers)-1].CumulativeVolume > maxQuantity {
-			maxQuantity = buyers[len(buyers)-1].CumulativeVolume
-		}
-		if len(sellers) > 0 && sellers[len(sellers)-1].CumulativeVolume > maxQuantity {
-			maxQuantity = sellers[len(sellers)-1].CumulativeVolume
-		}
-
-		// Marginal buyer price line (horizontal asymptote)
-		marginalBuyerLine, err := plotter.NewLine(plotter.XYs{
-			{X: 0, Y: float64(marginalBuyerPrice)},
-			{X: maxQuantity, Y: float64(marginalBuyerPrice)},
-		})
-		if err == nil {
-			marginalBuyerLine.Color = color.RGBA{R: 200, G: 50, B: 50, A: 180} // Semi-transparent red
-			marginalBuyerLine.Width = vg.Points(2)
-			marginalBuyerLine.Dashes = []vg.Length{vg.Points(10), vg.Points(5)}
-			p.Add(marginalBuyerLine)
-			if config.ShowLegend {
-				p.Legend.Add(fmt.Sprintf("Marginal Buyer: %d", marginalBuyerPrice), marginalBuyerLine)
-			}
-		}
-
-		// Marginal seller price line (horizontal asymptote)
-		marginalSellerLine, err2 := plotter.NewLine(plotter.XYs{
-			{X: 0, Y: float64(marginalSellerPrice)},
-			{X: maxQuantity, Y: float64(marginalSellerPrice)},
-		})
-		if err2 == nil {
-			marginalSellerLine.Color = color.RGBA{R: 50, G: 100, B: 200, A: 180} // Semi-transparent blue
-			marginalSellerLine.Width = vg.Points(2)
-			marginalSellerLine.Dashes = []vg.Length{vg.Points(10), vg.Points(5)}
-			p.Add(marginalSellerLine)
-			if config.ShowLegend {
-				p.Legend.Add(fmt.Sprintf("Marginal Seller: %d", marginalSellerPrice), marginalSellerLine)
-			}
-		}
-
-		// Find good position for visual marker
-		maxQuantity = float64(0)
-		maxPrice := float64(0)
-
-		if len(buyers) > 0 {
-			if buyers[len(buyers)-1].CumulativeVolume > maxQuantity {
-				maxQuantity = buyers[len(buyers)-1].CumulativeVolume
-			}
-			if buyers[0].Price > maxPrice {
-				maxPrice = buyers[0].Price
-			}
-		}
-		if len(sellers) > 0 {
-			if sellers[len(sellers)-1].CumulativeVolume > maxQuantity {
-				maxQuantity = sellers[len(sellers)-1].CumulativeVolume
-			}
-			for _, seller := range sellers {
-				if seller.Price > maxPrice {
-					maxPrice = seller.Price
-				}
-			}
-		}
-
-		// Position calculation marker in top-right area
-		annotationX := maxQuantity * 0.85
-		annotationY := maxPrice * 0.9
-
-		// Add a distinctive marker for the Euclidean division point
-		annotationPoint := plotter.XYs{{X: annotationX, Y: annotationY}}
-		annotationScatter, err := plotter.NewScatter(annotationPoint)
-		if err == nil {
-			annotationScatter.GlyphStyle.Color = color.RGBA{R: 243, G: 156, B: 18, A: 255} // Orange like clearing price
-			annotationScatter.GlyphStyle.Radius = vg.Points(3)
-			p.Add(annotationScatter)
-		}
-	}
-
-	// Position legend
-	if config.ShowLegend {
-		p.Legend.Top = true
-		p.Legend.Left = false
-	}
+	// Remove Euclidean division and commission annotations
+	if config.ShowLegend { p.Legend.Top = true; p.Legend.Left = false }
 
 	// Save plot - try SVG first, then fallback to text
 	svgPath := config.OutputPath
-	if svgPath[len(svgPath)-4:] == ".png" {
-		svgPath = svgPath[:len(svgPath)-4] + ".svg"
-	}
+	if len(svgPath) >= 4 && svgPath[len(svgPath)-4:] == ".png" { svgPath = svgPath[:len(svgPath)-4] + ".svg" }
 
 	if err := p.Save(config.Width, config.Height, svgPath); err != nil {
-		// If SVG fails, just print success message without actual file
-		fmt.Printf("⚠️  Plot rendering completed (file save may require additional dependencies)\n")
+		fmt.Printf("Plot rendering completed (file save may require additional dependencies)\n")
 		fmt.Printf("   Configuration: %dx%d, Title: %s\n", int(config.Width), int(config.Height), config.Title)
 		return nil
 	}
-
-	fmt.Printf("✅ Plot saved to: %s\n", svgPath)
+	fmt.Printf("Plot saved to: %s\n", svgPath)
 
 	return nil
 }
@@ -451,15 +347,15 @@ func CreateAuctionAnalysisPlots(inputs []DecryptedRegistration, roles map[int]ze
 	// Supply and Demand plot
 	supplyDemandConfig := DefaultPlotConfig()
 	supplyDemandConfig.OutputPath = fmt.Sprintf("%s/supply_demand.png", outputDir)
-	supplyDemandConfig.Title = fmt.Sprintf("Supply & Demand | Clearing Price: %v | Commission: %v | Traded: %d units",
-		auctionResult.ClearingPrice, auctionResult.AuctioneerCommission, auctionResult.TotalEnergyTraded)
+	supplyDemandConfig.Title = fmt.Sprintf("Supply & Demand | Clearing Price: %v | Traded: %d units",
+		auctionResult.ClearingPrice, auctionResult.TotalEnergyTraded)
 
 	if err := CreateSupplyDemandPlot(inputs, roles, auctionResult, supplyDemandConfig); err != nil {
 		return fmt.Errorf("failed to create supply/demand plot: %w", err)
 	}
 
-	fmt.Printf("✅ Auction plots created:\n")
-	fmt.Printf("   📈 Supply & Demand: %s\n", supplyDemandConfig.OutputPath)
+	fmt.Printf("Auction plots created:\n")
+	fmt.Printf("   Supply & Demand: %s\n", supplyDemandConfig.OutputPath)
 
 	return nil
 }
@@ -467,26 +363,20 @@ func CreateAuctionAnalysisPlots(inputs []DecryptedRegistration, roles map[int]ze
 // VisualizeAuctionBehavior creates a comprehensive visual analysis of auction behavior
 func VisualizeAuctionBehavior(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType, auctionResult *AuctionExecutionResult) error {
 	config := DefaultPlotConfig()
-	config.Title = fmt.Sprintf("Auction Analysis | Clearing: %v | Commission: %v | Traded: %d",
-		auctionResult.ClearingPrice, auctionResult.AuctioneerCommission, auctionResult.TotalEnergyTraded)
-
+	config.Title = fmt.Sprintf("Auction Analysis | Clearing: %v | Traded: %d",
+		auctionResult.ClearingPrice, auctionResult.TotalEnergyTraded)
 	err := CreateSupplyDemandPlot(inputs, roles, auctionResult, config)
 	if err != nil {
 		return fmt.Errorf("failed to create auction visualization: %w", err)
 	}
+	fmt.Printf("Auction visualization saved to: %s\n", config.OutputPath)
 
-	fmt.Printf("🎯 Auction visualization saved to: %s\n", config.OutputPath)
-
-	// Print summary
+	fmt.Printf("\nMarket summary:\n")
 	buyers, sellers := prepareParticipantPlotData(inputs, roles, auctionResult)
-
-	fmt.Printf("\n📊 Market Summary:\n")
 	fmt.Printf("   Buyers: %d total (%d qualified)\n", len(buyers), countQualified(buyers))
 	fmt.Printf("   Sellers: %d total (%d qualified)\n", len(sellers), countQualified(sellers))
-	fmt.Printf("   Clearing Price: %v coins/unit\n", auctionResult.ClearingPrice)
-	fmt.Printf("   Commission: %v coins\n", auctionResult.AuctioneerCommission)
-	fmt.Printf("   Energy Traded: %d units\n", auctionResult.TotalEnergyTraded)
-
+	fmt.Printf("   Clearing price: %v coins/unit\n", auctionResult.ClearingPrice)
+	fmt.Printf("   Energy traded: %d units\n", auctionResult.TotalEnergyTraded)
 	return nil
 }
 

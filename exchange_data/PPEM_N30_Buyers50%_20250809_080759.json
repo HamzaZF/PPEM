@@ -1,0 +1,638 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-09T08:07:59.299676226Z",
+    "total_participants": 30,
+    "buyer_count": 15,
+    "seller_count": 15,
+    "trading_occurred": true,
+    "export_version": "2.0"
+  },
+  "market_data": {
+    "clearing_price": 38,
+    "total_energy_traded": 172,
+    "total_coins_traded": 6536,
+    "qualified_buyers": 13,
+    "qualified_sellers": 14
+  },
+  "participants_before": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 47,
+      "quantity": 6,
+      "coins": 1660,
+      "energy": 74,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 9,
+      "quantity": 11,
+      "coins": 2896,
+      "energy": 122,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 2,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 8,
+      "coins": 2293,
+      "energy": 171,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 3,
+      "role": "SELL",
+      "price": 7,
+      "quantity": 13,
+      "coins": 2517,
+      "energy": 78,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 4,
+      "role": "BUY",
+      "price": 47,
+      "quantity": 20,
+      "coins": 2323,
+      "energy": 137,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 5,
+      "role": "SELL",
+      "price": 9,
+      "quantity": 9,
+      "coins": 2446,
+      "energy": 140,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 6,
+      "role": "BUY",
+      "price": 49,
+      "quantity": 18,
+      "coins": 1926,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 7,
+      "role": "SELL",
+      "price": 14,
+      "quantity": 20,
+      "coins": 2322,
+      "energy": 140,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 8,
+      "role": "BUY",
+      "price": 36,
+      "quantity": 20,
+      "coins": 1396,
+      "energy": 78,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 9,
+      "role": "SELL",
+      "price": 18,
+      "quantity": 6,
+      "coins": 2202,
+      "energy": 203,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 10,
+      "role": "BUY",
+      "price": 43,
+      "quantity": 19,
+      "coins": 2342,
+      "energy": 191,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 11,
+      "role": "SELL",
+      "price": 13,
+      "quantity": 18,
+      "coins": 2083,
+      "energy": 157,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 12,
+      "role": "BUY",
+      "price": 53,
+      "quantity": 8,
+      "coins": 2587,
+      "energy": 155,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 13,
+      "role": "SELL",
+      "price": 11,
+      "quantity": 21,
+      "coins": 1831,
+      "energy": 137,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 14,
+      "role": "BUY",
+      "price": 43,
+      "quantity": 18,
+      "coins": 1617,
+      "energy": 149,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 15,
+      "role": "SELL",
+      "price": 16,
+      "quantity": 1,
+      "coins": 1939,
+      "energy": 68,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 16,
+      "role": "BUY",
+      "price": 51,
+      "quantity": 6,
+      "coins": 2045,
+      "energy": 146,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 17,
+      "role": "SELL",
+      "price": 22,
+      "quantity": 1,
+      "coins": 2231,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 18,
+      "role": "BUY",
+      "price": 40,
+      "quantity": 14,
+      "coins": 2795,
+      "energy": 165,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 19,
+      "role": "SELL",
+      "price": 15,
+      "quantity": 6,
+      "coins": 3101,
+      "energy": 88,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 20,
+      "role": "BUY",
+      "price": 46,
+      "quantity": 7,
+      "coins": 2494,
+      "energy": 95,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 21,
+      "role": "SELL",
+      "price": 10,
+      "quantity": 17,
+      "coins": 3065,
+      "energy": 123,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 22,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 10,
+      "coins": 2652,
+      "energy": 129,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 23,
+      "role": "SELL",
+      "price": 17,
+      "quantity": 10,
+      "coins": 1997,
+      "energy": 121,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 24,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 18,
+      "coins": 1257,
+      "energy": 70,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 25,
+      "role": "SELL",
+      "price": 12,
+      "quantity": 19,
+      "coins": 2319,
+      "energy": 89,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 26,
+      "role": "BUY",
+      "price": 23,
+      "quantity": 10,
+      "coins": 2368,
+      "energy": 95,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 27,
+      "role": "SELL",
+      "price": 19,
+      "quantity": 20,
+      "coins": 3289,
+      "energy": 155,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 28,
+      "role": "BUY",
+      "price": 15,
+      "quantity": 5,
+      "coins": 1825,
+      "energy": 81,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 29,
+      "role": "SELL",
+      "price": 37,
+      "quantity": 19,
+      "coins": 3098,
+      "energy": 113,
+      "is_qualified": true,
+      "trade_amount": 0
+    }
+  ],
+  "participants_after": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 47,
+      "quantity": 6,
+      "coins": 1660,
+      "energy": 74,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 9,
+      "quantity": 11,
+      "coins": 2896,
+      "energy": 122,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 2,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 8,
+      "coins": 2293,
+      "energy": 171,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 3,
+      "role": "SELL",
+      "price": 7,
+      "quantity": 13,
+      "coins": 2517,
+      "energy": 78,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 4,
+      "role": "BUY",
+      "price": 47,
+      "quantity": 20,
+      "coins": 2323,
+      "energy": 137,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 5,
+      "role": "SELL",
+      "price": 9,
+      "quantity": 9,
+      "coins": 2446,
+      "energy": 140,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 6,
+      "role": "BUY",
+      "price": 49,
+      "quantity": 18,
+      "coins": 1926,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 7,
+      "role": "SELL",
+      "price": 14,
+      "quantity": 20,
+      "coins": 2322,
+      "energy": 140,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 8,
+      "role": "BUY",
+      "price": 36,
+      "quantity": 20,
+      "coins": 1396,
+      "energy": 78,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 9,
+      "role": "SELL",
+      "price": 18,
+      "quantity": 6,
+      "coins": 2202,
+      "energy": 203,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 10,
+      "role": "BUY",
+      "price": 43,
+      "quantity": 19,
+      "coins": 2342,
+      "energy": 191,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 11,
+      "role": "SELL",
+      "price": 13,
+      "quantity": 18,
+      "coins": 2083,
+      "energy": 157,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 12,
+      "role": "BUY",
+      "price": 53,
+      "quantity": 8,
+      "coins": 2587,
+      "energy": 155,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 13,
+      "role": "SELL",
+      "price": 11,
+      "quantity": 21,
+      "coins": 1831,
+      "energy": 137,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 14,
+      "role": "BUY",
+      "price": 43,
+      "quantity": 18,
+      "coins": 1617,
+      "energy": 149,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 15,
+      "role": "SELL",
+      "price": 16,
+      "quantity": 1,
+      "coins": 1939,
+      "energy": 68,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 16,
+      "role": "BUY",
+      "price": 51,
+      "quantity": 6,
+      "coins": 2045,
+      "energy": 146,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 17,
+      "role": "SELL",
+      "price": 22,
+      "quantity": 1,
+      "coins": 2231,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 18,
+      "role": "BUY",
+      "price": 40,
+      "quantity": 14,
+      "coins": 2795,
+      "energy": 165,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 19,
+      "role": "SELL",
+      "price": 15,
+      "quantity": 6,
+      "coins": 3101,
+      "energy": 88,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 20,
+      "role": "BUY",
+      "price": 46,
+      "quantity": 7,
+      "coins": 2494,
+      "energy": 95,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 21,
+      "role": "SELL",
+      "price": 10,
+      "quantity": 17,
+      "coins": 3065,
+      "energy": 123,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 22,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 10,
+      "coins": 2652,
+      "energy": 129,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 23,
+      "role": "SELL",
+      "price": 17,
+      "quantity": 10,
+      "coins": 1997,
+      "energy": 121,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 24,
+      "role": "BUY",
+      "price": 55,
+      "quantity": 18,
+      "coins": 1257,
+      "energy": 70,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 25,
+      "role": "SELL",
+      "price": 12,
+      "quantity": 19,
+      "coins": 2319,
+      "energy": 89,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 26,
+      "role": "BUY",
+      "price": 23,
+      "quantity": 10,
+      "coins": 2368,
+      "energy": 95,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 27,
+      "role": "SELL",
+      "price": 19,
+      "quantity": 20,
+      "coins": 3289,
+      "energy": 155,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 28,
+      "role": "BUY",
+      "price": 15,
+      "quantity": 5,
+      "coins": 1825,
+      "energy": 81,
+      "is_qualified": false,
+      "trade_amount": 0
+    },
+    {
+      "id": 29,
+      "role": "SELL",
+      "price": 37,
+      "quantity": 19,
+      "coins": 3098,
+      "energy": 113,
+      "is_qualified": true,
+      "trade_amount": 0
+    }
+  ],
+  "trades": null,
+  "euclidean_division": {
+    "marginal_buyer_price": 55,
+    "marginal_seller_price": 22,
+    "clearing_price": 38,
+    "is_valid": true
+  },
+  "conservation": {
+    "total_input_coins": 68916,
+    "total_input_energy": 3656,
+    "total_output_coins": 68916,
+    "total_output_energy": 3656,
+    "coins_conserved": true,
+    "energy_conserved": true,
+    "participant_count": 30,
+    "total_output_count": 30
+  }
+}

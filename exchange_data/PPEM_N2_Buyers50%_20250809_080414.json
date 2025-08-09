@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-09T08:04:14.061800316Z",
+    "total_participants": 2,
+    "buyer_count": 1,
+    "seller_count": 1,
+    "trading_occurred": true,
+    "export_version": "2.0"
+  },
+  "market_data": {
+    "clearing_price": 35,
+    "total_energy_traded": 19,
+    "total_coins_traded": 665,
+    "qualified_buyers": 1,
+    "qualified_sellers": 1
+  },
+  "participants_before": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 50,
+      "quantity": 19,
+      "coins": 2426,
+      "energy": 109,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 21,
+      "quantity": 19,
+      "coins": 2781,
+      "energy": 84,
+      "is_qualified": true,
+      "trade_amount": 0
+    }
+  ],
+  "participants_after": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 50,
+      "quantity": 19,
+      "coins": 2426,
+      "energy": 109,
+      "is_qualified": true,
+      "trade_amount": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 21,
+      "quantity": 19,
+      "coins": 2781,
+      "energy": 84,
+      "is_qualified": true,
+      "trade_amount": 0
+    }
+  ],
+  "trades": null,
+  "euclidean_division": {
+    "marginal_buyer_price": 50,
+    "marginal_seller_price": 21,
+    "clearing_price": 35,
+    "is_valid": true
+  },
+  "conservation": {
+    "total_input_coins": 5207,
+    "total_input_energy": 193,
+    "total_output_coins": 5207,
+    "total_output_energy": 193,
+    "coins_conserved": true,
+    "energy_conserved": true,
+    "participant_count": 2,
+    "total_output_count": 2
+  }
+}

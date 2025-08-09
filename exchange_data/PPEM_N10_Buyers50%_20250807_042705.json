@@ -1,0 +1,271 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-07T04:27:05.957322778Z",
+    "total_participants": 10,
+    "buyer_count": 5,
+    "seller_count": 5,
+    "trading_occurred": true,
+    "export_version": "1.0"
+  },
+  "market_data": {
+    "clearing_price": 44,
+    "total_energy_traded": 50,
+    "total_coins_traded": 2225,
+    "qualified_buyers": 3,
+    "qualified_sellers": 3,
+    "auctioneer_commission": 50,
+    "commission_per_unit": 1
+  },
+  "participants_before": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 56,
+      "quantity": 24,
+      "coins": 2333,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 33,
+      "quantity": 13,
+      "coins": 3064,
+      "energy": 146,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 2,
+      "role": "BUY",
+      "price": 72,
+      "quantity": 12,
+      "coins": 3450,
+      "energy": 128,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 3,
+      "role": "SELL",
+      "price": 33,
+      "quantity": 20,
+      "coins": 2598,
+      "energy": 143,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 4,
+      "role": "BUY",
+      "price": 63,
+      "quantity": 14,
+      "coins": 2073,
+      "energy": 124,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 5,
+      "role": "SELL",
+      "price": 25,
+      "quantity": 17,
+      "coins": 2952,
+      "energy": 97,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 6,
+      "role": "BUY",
+      "price": 33,
+      "quantity": 5,
+      "coins": 2536,
+      "energy": 154,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 7,
+      "role": "SELL",
+      "price": 67,
+      "quantity": 14,
+      "coins": 3191,
+      "energy": 108,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 8,
+      "role": "BUY",
+      "price": 34,
+      "quantity": 20,
+      "coins": 3203,
+      "energy": 141,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 9,
+      "role": "SELL",
+      "price": 63,
+      "quantity": 14,
+      "coins": 3610,
+      "energy": 97,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    }
+  ],
+  "participants_after": [
+    {
+      "id": 0,
+      "role": "BUY",
+      "price": 56,
+      "quantity": 24,
+      "coins": 2333,
+      "energy": 93,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 1,
+      "role": "SELL",
+      "price": 33,
+      "quantity": 13,
+      "coins": 3064,
+      "energy": 146,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 2,
+      "role": "BUY",
+      "price": 72,
+      "quantity": 12,
+      "coins": 3450,
+      "energy": 128,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 3,
+      "role": "SELL",
+      "price": 33,
+      "quantity": 20,
+      "coins": 2598,
+      "energy": 143,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 4,
+      "role": "BUY",
+      "price": 63,
+      "quantity": 14,
+      "coins": 2073,
+      "energy": 124,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 5,
+      "role": "SELL",
+      "price": 25,
+      "quantity": 17,
+      "coins": 2952,
+      "energy": 97,
+      "is_qualified": true,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 6,
+      "role": "BUY",
+      "price": 33,
+      "quantity": 5,
+      "coins": 2536,
+      "energy": 154,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 7,
+      "role": "SELL",
+      "price": 67,
+      "quantity": 14,
+      "coins": 3191,
+      "energy": 108,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 8,
+      "role": "BUY",
+      "price": 34,
+      "quantity": 20,
+      "coins": 3203,
+      "energy": 141,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    },
+    {
+      "id": 9,
+      "role": "SELL",
+      "price": 63,
+      "quantity": 14,
+      "coins": 3610,
+      "energy": 97,
+      "is_qualified": false,
+      "trade_amount": 0,
+      "commission_paid": 0
+    }
+  ],
+  "trades": null,
+  "euclidean_division": {
+    "marginal_buyer_price": 45,
+    "marginal_seller_price": 44,
+    "sum": 89,
+    "quotient": 44,
+    "remainder": 1,
+    "formula": "(45 + 44) = 2×44 + 1",
+    "is_valid": true
+  },
+  "conservation": {
+    "total_input_coins": 29010,
+    "total_input_energy": 1231,
+    "total_output_coins": 29060,
+    "total_output_energy": 1231,
+    "auctioneer_coins": 50,
+    "auctioneer_energy": 0,
+    "coins_conserved": false,
+    "energy_conserved": true,
+    "participant_count": 10,
+    "total_output_count": 11
+  },
+  "auctioneer_note": {
+    "coins": 50,
+    "energy": 0,
+    "public_key": 113416305651693489155599166647007492649065000821537360480229143971200001628836476516940985920361340411145570114,
+    "has_note_data": true
+  }
+}

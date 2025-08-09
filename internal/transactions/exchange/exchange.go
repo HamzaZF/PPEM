@@ -282,479 +282,203 @@ func DecZKRegGo(c [7]*big.Int, encKey bls12377.G1Affine) [7]*big.Int {
 
 // AuctionResult contains the results of the auction execution
 type AuctionExecutionResult struct {
-	Outputs              []DecryptedRegistration // N participant outputs
-	AuctioneerNote       *DecryptedRegistration  // +1 auctioneer commission note
-	ClearingPrice        *big.Int
-	MarginalBuyerPrice   *big.Int // Real marginal buyer price from intersection
-	MarginalSellerPrice  *big.Int // Real marginal seller price from intersection
-	AuctioneerCommission *big.Int
-	TotalEnergyTraded    int64
-	TotalCoinsTraded     int64
-	QualifiedBuyers      int
-	QualifiedSellers     int
+	Outputs             []DecryptedRegistration
+	ClearingPrice       *big.Int
+	MarginalBuyerPrice  *big.Int
+	MarginalSellerPrice *big.Int
+	TotalEnergyTraded   int64
+	TotalCoinsTraded    int64
+	QualifiedBuyers     int
+	QualifiedSellers    int
 }
 
-// RunAuctionLogic implements a simple double auction mechanism
-//  1. Sort buyers (descending) and sellers (ascending) based on actual roles
-//  2. Find intersection point where buyer_bid >= seller_ask
-//  3. Calculate clearing price using Euclidean division: (buy_price + sell_price) = 2*clearing_price + remainder
-//     The remainder becomes the auctioneer's commission (ZKP circuit compatible)
-//  4. Execute trades for all qualifying participants at clearing price
-//  5. Collect auctioneer commission and ensure conservation
-//  6. Create proper auctioneer commission note for balance conservation
-func RunAuctionLogicWithCommission(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) *AuctionExecutionResult {
-	return RunAuctionLogicWithCommissionAndAuctioneer(inputs, roles, nil)
-}
-
-// RunAuctionLogicWithCommissionAndAuctioneer runs auction logic with proper auctioneer note creation
-func RunAuctionLogicWithCommissionAndAuctioneer(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType, auctioneerSk *big.Int) *AuctionExecutionResult {
-	if len(inputs) == 0 {
-		// Create auctioneer note even with no participants (for consistency)
-		auctioneerNote := createAuctioneerNote(auctioneerSk, big.NewInt(0), big.NewInt(0), 0)
-
-		return &AuctionExecutionResult{
-			Outputs:              inputs,
-			AuctioneerNote:       auctioneerNote,
-			ClearingPrice:        big.NewInt(0),
-			MarginalBuyerPrice:   big.NewInt(0),
-			MarginalSellerPrice:  big.NewInt(0),
-			AuctioneerCommission: big.NewInt(0),
-			TotalEnergyTraded:    0,
-			TotalCoinsTraded:     0,
-			QualifiedBuyers:      0,
-			QualifiedSellers:     0,
-		}
-	}
-
-	numParticipants := len(inputs)
-
-	// Create output array (copy of inputs initially)
+// RunAuctionLogicUniform implements a uniform-price double auction without commission.
+// Inputs must already be sorted: buyers first (desc price), sellers next (asc price).
+func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) *AuctionExecutionResult {
 	outputs := make([]DecryptedRegistration, len(inputs))
 	copy(outputs, inputs)
 
-	// Split into buyers and sellers with their original indices based on actual roles
+	// Split sorted inputs into buyers and sellers based on roles count
 	type IndexedParticipant struct {
 		Index int
 		Data  DecryptedRegistration
 	}
-
-	// Use pre-sorted inputs directly instead of re-sorting
-	// The inputs are already sorted: buyers first (descending), then sellers (ascending)
-
 	var buyers, sellers []IndexedParticipant
-
-	// Count buyers to split the sorted array correctly
 	buyerCount := 0
-	for _, role := range roles {
-		if role == zerocash.BUY {
-			buyerCount++
-		}
-	}
-
-	// First 'buyerCount' participants are buyers (already sorted descending)
-	for i := 0; i < buyerCount; i++ {
+	for _, role := range roles { if role == zerocash.BUY { buyerCount++ } }
+	for i := 0; i < buyerCount && i < len(inputs); i++ {
 		buyers = append(buyers, IndexedParticipant{Index: i, Data: inputs[i]})
 	}
-
-	// Remaining participants are sellers (already sorted ascending)
-	for i := buyerCount; i < numParticipants; i++ {
+	for i := buyerCount; i < len(inputs); i++ {
 		sellers = append(sellers, IndexedParticipant{Index: i, Data: inputs[i]})
 	}
-
-	// No need to re-sort since inputs are already sorted by SortParticipantsForCircuit
-
-	// Helper function to find intersection point using proper step-wise curve logic
-	findClearingPrice := func(buyers, sellers []IndexedParticipant) (*big.Int, *big.Int, *big.Int, *big.Int, bool) {
-		if len(buyers) == 0 || len(sellers) == 0 {
-			return nil, nil, nil, nil, false
-		}
-
-		// Build cumulative step-wise curves
-		buyerSteps := make([]struct {
-			price         *big.Int
-			cumulativeQty int64
-		}, 0)
-		sellerSteps := make([]struct {
-			price         *big.Int
-			cumulativeQty int64
-		}, 0)
-
-		// Build buyer steps (demand curve - descending prices)
-		var buyerCumQty int64 = 0
-		for _, buyer := range buyers {
-			if buyer.Data.Price != nil && buyer.Data.Quantity != nil {
-				buyerCumQty += buyer.Data.Quantity.Int64()
-				buyerSteps = append(buyerSteps, struct {
-					price         *big.Int
-					cumulativeQty int64
-				}{
-					price: buyer.Data.Price, cumulativeQty: buyerCumQty,
-				})
-			}
-		}
-
-		// Build seller steps (supply curve - ascending prices)
-		var sellerCumQty int64 = 0
-		for _, seller := range sellers {
-			if seller.Data.Price != nil && seller.Data.Quantity != nil {
-				sellerCumQty += seller.Data.Quantity.Int64()
-				sellerSteps = append(sellerSteps, struct {
-					price         *big.Int
-					cumulativeQty int64
-				}{
-					price: seller.Data.Price, cumulativeQty: sellerCumQty,
-				})
-			}
-		}
-
-		// Find the REAL intersection: where supply meets demand at maximum volume
-		var marginalBuyerPrice, marginalSellerPrice *big.Int
-		var maxValidQuantity int64 = 0
-
-		if len(buyerSteps) > 0 && len(sellerSteps) > 0 {
-			// Find the intersection that maximizes traded quantity
-			for bIdx := 0; bIdx < len(buyerSteps); bIdx++ {
-				for sIdx := 0; sIdx < len(sellerSteps); sIdx++ {
-					buyer := buyerSteps[bIdx]
-					seller := sellerSteps[sIdx]
-
-					// Check if this is a valid trade (buyer willing to pay >= seller asking)
-					if buyer.price.Cmp(seller.price) >= 0 {
-						// Calculate how much can be traded at this price intersection
-						tradableQty := buyer.cumulativeQty
-						if seller.cumulativeQty < tradableQty {
-							tradableQty = seller.cumulativeQty
-						}
-
-						// Keep the intersection that allows maximum trading volume
-						if tradableQty > maxValidQuantity {
-							maxValidQuantity = tradableQty
-							marginalBuyerPrice = buyer.price
-							marginalSellerPrice = seller.price
-						}
-					}
-				}
-			}
-		}
-
-		if marginalBuyerPrice != nil && marginalSellerPrice != nil {
-			// Clearing price using Euclidean division for ZKP circuit compatibility
-			// (marginal_buyer_price + marginal_seller_price) = 2 * clearing_price + remainder
-			// The remainder becomes the auctioneer's commission
-			sum := new(big.Int).Add(marginalBuyerPrice, marginalSellerPrice)
-			clearingPrice := new(big.Int).Div(sum, big.NewInt(2))
-			remainder := new(big.Int).Mod(sum, big.NewInt(2))
-
-			return clearingPrice, remainder, marginalBuyerPrice, marginalSellerPrice, true
-		}
-
-		return nil, nil, nil, nil, false
+	if len(buyers) == 0 || len(sellers) == 0 {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
 	}
 
-	// Helper function to execute trades at clearing price with proper market clearing
-	executeTradesAtClearingPrice := func(buyers, sellers []IndexedParticipant, clearingPrice *big.Int, auctioneerCommission *big.Int) (int64, int64, int, int) {
-		// Find qualifying buyers (bid >= clearing price)
-		var qualifiedBuyers []IndexedParticipant
-		for _, buyer := range buyers {
-			if buyer.Data.Price != nil && buyer.Data.Price.Cmp(clearingPrice) >= 0 {
-				qualifiedBuyers = append(qualifiedBuyers, buyer)
+	// Build set of distinct candidate prices (from buyers and sellers)
+	priceSet := map[string]*big.Int{}
+	for _, b := range buyers { if b.Data.Price != nil { priceSet[b.Data.Price.String()] = b.Data.Price } }
+	for _, s := range sellers { if s.Data.Price != nil { priceSet[s.Data.Price.String()] = s.Data.Price } }
+	if len(priceSet) == 0 { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)} }
+	prices := make([]*big.Int, 0, len(priceSet))
+	for _, p := range priceSet { prices = append(prices, new(big.Int).Set(p)) }
+	sort.Slice(prices, func(i, j int) bool { return prices[i].Cmp(prices[j]) < 0 })
+
+	// Helper to compute D(p), S(p)
+	demandSupplyAt := func(p *big.Int) (int64, int64) {
+		var d, s int64
+		for _, b := range buyers {
+			if b.Data.Price != nil && b.Data.Price.Cmp(p) >= 0 && b.Data.Quantity != nil {
+				d += b.Data.Quantity.Int64()
 			}
 		}
-
-		// Find qualifying sellers (ask <= clearing price)
-		var qualifiedSellers []IndexedParticipant
-		for _, seller := range sellers {
-			if seller.Data.Price != nil && seller.Data.Price.Cmp(clearingPrice) <= 0 {
-				qualifiedSellers = append(qualifiedSellers, seller)
+		for _, s_ := range sellers {
+			if s_.Data.Price != nil && s_.Data.Price.Cmp(p) <= 0 && s_.Data.Quantity != nil {
+				s += s_.Data.Quantity.Int64()
 			}
 		}
+		return d, s
+	}
 
-		// Calculate total qualified demand and supply
-		var totalDemand, totalSupply int64
-		for _, buyer := range qualifiedBuyers {
-			quantity := buyer.Data.Quantity
-			if quantity == nil {
-				quantity = big.NewInt(10) // Default trading quantity
-			}
-			totalDemand += quantity.Int64()
+	// Find p* = smallest p where S(p) >= D(p)
+	var pStar *big.Int
+	for _, p := range prices {
+		d, s := demandSupplyAt(p)
+		if s >= d {
+			pStar = new(big.Int).Set(p)
+			break
 		}
+	}
+	if pStar == nil { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)} }
 
-		for _, seller := range qualifiedSellers {
-			quantity := seller.Data.Quantity
-			if quantity == nil {
-				quantity = big.NewInt(10) // Default trading quantity
-			}
-			totalSupply += quantity.Int64()
-		}
+	// Qualified sets at p*
+	qualifiedBuyers := make([]IndexedParticipant, 0)
+	for _, b := range buyers { if b.Data.Price != nil && b.Data.Price.Cmp(pStar) >= 0 { qualifiedBuyers = append(qualifiedBuyers, b) } }
+	qualifiedSellers := make([]IndexedParticipant, 0)
+	for _, s := range sellers { if s.Data.Price != nil && s.Data.Price.Cmp(pStar) <= 0 { qualifiedSellers = append(qualifiedSellers, s) } }
+	if len(qualifiedBuyers) == 0 || len(qualifiedSellers) == 0 {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
+	}
 
-		// Market clearing: trade the minimum of total demand and supply
-		tradeableQuantity := totalDemand
-		if totalSupply < totalDemand {
-			tradeableQuantity = totalSupply
-		}
+	// Marginals at p*
+	sort.Slice(qualifiedBuyers, func(i, j int) bool { return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) < 0 })
+	sort.Slice(qualifiedSellers, func(i, j int) bool { return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0 })
+	bMarg := qualifiedBuyers[len(qualifiedBuyers)-1].Data.Price
+	aMarg := qualifiedSellers[len(qualifiedSellers)-1].Data.Price
+	clearingPrice := new(big.Int).Div(new(big.Int).Add(bMarg, aMarg), big.NewInt(2))
+	if clearingPrice.Sign() == 0 {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
+	}
 
-		if tradeableQuantity <= 0 {
-			return 0, 0, len(qualifiedBuyers), len(qualifiedSellers)
-		}
+	// Compute caps and totals
+	var effDemand, effSupply int64
+	buyerCaps := make(map[int]int64)
+	sellerCaps := make(map[int]int64)
+	for _, b := range qualifiedBuyers {
+		qty := int64(0); if b.Data.Quantity != nil { qty = b.Data.Quantity.Int64() }
+		coins := new(big.Int); if b.Data.Coins != nil { coins.Set(b.Data.Coins) } else { coins.SetInt64(0) }
+		afford := new(big.Int).Div(coins, clearingPrice).Int64()
+		cap := qty; if afford < cap { cap = afford }
+		if cap < 0 { cap = 0 }
+		buyerCaps[b.Index] = cap
+		effDemand += cap
+	}
+	for _, s := range qualifiedSellers {
+		qty := int64(0); if s.Data.Quantity != nil { qty = s.Data.Quantity.Int64() }
+		energy := int64(0); if s.Data.Energy != nil { energy = s.Data.Energy.Int64() }
+		cap := qty; if energy < cap { cap = energy }
+		if cap < 0 { cap = 0 }
+		sellerCaps[s.Index] = cap
+		effSupply += cap
+	}
+	tradedTotal := effDemand
+	if effSupply < tradedTotal { tradedTotal = effSupply }
+	if tradedTotal <= 0 { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: clearingPrice, MarginalBuyerPrice: bMarg, MarginalSellerPrice: aMarg, TotalEnergyTraded: 0, QualifiedBuyers: len(qualifiedBuyers), QualifiedSellers: len(qualifiedSellers)} }
 
-		// Priority-based allocation using price-time priority
-		// Sort buyers by price (descending) - higher bidders get priority
-		sort.Slice(qualifiedBuyers, func(i, j int) bool {
-			if qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) != 0 {
-				return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0
-			}
-			// Tie-breaker: original index (time priority)
+	// Allocate
+	totalCoinsTraded := int64(0)
+	if effDemand >= effSupply {
+		// Supply binding: fill sellers to cap; allocate buyers by desc price
+		for _, s := range qualifiedSellers { /* full, recorded in cap map */ _ = s }
+		sort.SliceStable(qualifiedBuyers, func(i, j int) bool {
+			if qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) != 0 { return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0 }
 			return qualifiedBuyers[i].Index < qualifiedBuyers[j].Index
 		})
-
-		// Sort sellers by price (ascending) - lower offers get priority
-		sort.Slice(qualifiedSellers, func(i, j int) bool {
-			if qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) != 0 {
-				return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0
-			}
-			// Tie-breaker: original index (time priority)
+		remaining := tradedTotal
+		for _, b := range qualifiedBuyers {
+			if remaining == 0 { break }
+			cap := buyerCaps[b.Index]
+			take := cap; if take > remaining { take = remaining }
+			if take > 0 { buyerCaps[b.Index] = take; remaining -= take }
+		}
+	} else {
+		// Demand binding: fill buyers to cap; allocate sellers by asc price
+		for _, b := range qualifiedBuyers { /* full cap */ _ = b }
+		sort.SliceStable(qualifiedSellers, func(i, j int) bool {
+			if qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) != 0 { return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0 }
 			return qualifiedSellers[i].Index < qualifiedSellers[j].Index
 		})
-
-		// Execute trades with proper quantity allocation
-		var totalEnergyTraded int64 = 0
-		var totalCoinsTraded int64 = 0
-
-		// Allocate to buyers (demand side)
-		remainingDemand := tradeableQuantity
-		buyerAllocation := make(map[int]int64) // buyer index -> allocated quantity
-
-		for _, buyer := range qualifiedBuyers {
-			if remainingDemand <= 0 {
-				break
-			}
-
-			quantity := buyer.Data.Quantity
-			if quantity == nil {
-				quantity = big.NewInt(10)
-			}
-			desiredQty := quantity.Int64()
-
-			// Allocate up to desired quantity or remaining demand
-			allocatedQty := desiredQty
-			if allocatedQty > remainingDemand {
-				allocatedQty = remainingDemand
-			}
-
-			buyerAllocation[buyer.Index] = allocatedQty
-			remainingDemand -= allocatedQty
-		}
-
-		// Allocate to sellers (supply side)
-		remainingSupply := tradeableQuantity
-		sellerAllocation := make(map[int]int64) // seller index -> allocated quantity
-
-		for _, seller := range qualifiedSellers {
-			if remainingSupply <= 0 {
-				break
-			}
-
-			quantity := seller.Data.Quantity
-			if quantity == nil {
-				quantity = big.NewInt(10)
-			}
-			desiredQty := quantity.Int64()
-
-			// Allocate up to desired quantity or remaining supply
-			allocatedQty := desiredQty
-			if allocatedQty > remainingSupply {
-				allocatedQty = remainingSupply
-			}
-
-			sellerAllocation[seller.Index] = allocatedQty
-			remainingSupply -= allocatedQty
-		}
-
-		// Execute buyer trades
-		for _, buyer := range qualifiedBuyers {
-			allocatedQty := buyerAllocation[buyer.Index]
-			if allocatedQty <= 0 {
-				continue
-			}
-
-			idx := buyer.Index
-			tradingCost := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
-
-			// Calculate commission for this trade (commission per unit * quantity)
-			// Note: Commission is split between buyer and seller, so each pays half
-			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
-			halfCommission := new(big.Int).Div(tradeCommission, big.NewInt(2))
-			// Handle odd commission by giving the remainder to the buyer
-			commissionRemainder := new(big.Int).Mod(tradeCommission, big.NewInt(2))
-			buyerCommission := new(big.Int).Add(halfCommission, commissionRemainder)
-
-			totalCostWithCommission := new(big.Int).Add(tradingCost, buyerCommission)
-
-			// Buyer: lose coins (including commission), gain energy
-			outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, totalCostWithCommission)
-			outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, big.NewInt(allocatedQty))
-
-			totalEnergyTraded += allocatedQty
-			totalCoinsTraded += totalCostWithCommission.Int64()
-		}
-
-		// Execute seller trades
-		for _, seller := range qualifiedSellers {
-			allocatedQty := sellerAllocation[seller.Index]
-			if allocatedQty <= 0 {
-				continue
-			}
-
-			idx := seller.Index
-			tradingRevenue := new(big.Int).Mul(clearingPrice, big.NewInt(allocatedQty))
-
-			// Calculate commission for this trade (commission per unit * quantity)
-			// Note: Commission is split between buyer and seller, so each pays half
-			tradeCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(allocatedQty))
-			sellerCommission := new(big.Int).Div(tradeCommission, big.NewInt(2))
-
-			netRevenue := new(big.Int).Sub(tradingRevenue, sellerCommission)
-
-			// Seller: gain coins (minus commission), lose energy
-			outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, netRevenue)
-			outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, big.NewInt(allocatedQty))
-		}
-
-		return totalEnergyTraded, totalCoinsTraded, len(qualifiedBuyers), len(qualifiedSellers)
-	}
-
-	// Find intersection point
-	clearingPrice, auctioneerCommission, marginalBuyerPrice, marginalSellerPrice, tradingOccurs := findClearingPrice(buyers, sellers)
-
-	if !tradingOccurs {
-		// Create auctioneer note even when no trading (for consistency and conservation)
-		auctioneerNote := createAuctioneerNote(auctioneerSk, big.NewInt(0), big.NewInt(0), 0)
-
-		return &AuctionExecutionResult{
-			Outputs:              outputs,
-			AuctioneerNote:       auctioneerNote,
-			ClearingPrice:        big.NewInt(0),
-			MarginalBuyerPrice:   big.NewInt(0),
-			MarginalSellerPrice:  big.NewInt(0),
-			AuctioneerCommission: big.NewInt(0),
-			TotalEnergyTraded:    0,
-			TotalCoinsTraded:     0,
-			QualifiedBuyers:      0,
-			QualifiedSellers:     0,
+		remaining := tradedTotal
+		for _, s := range qualifiedSellers {
+			if remaining == 0 { break }
+			cap := sellerCaps[s.Index]
+			take := cap; if take > remaining { take = remaining }
+			if take > 0 { sellerCaps[s.Index] = take; remaining -= take }
 		}
 	}
 
-	// Execute trades for qualifying participants
-	totalEnergyTraded, totalCoinsTraded, qualifiedBuyers, qualifiedSellers := executeTradesAtClearingPrice(buyers, sellers, clearingPrice, auctioneerCommission)
-
-	// Calculate total commission collected (commission per unit * total units traded)
-	totalCommission := new(big.Int).Mul(auctioneerCommission, big.NewInt(totalEnergyTraded))
-
-	// Create auctioneer commission note using proper cryptographic construction
-	auctioneerNote := createAuctioneerNote(auctioneerSk, totalCommission, clearingPrice, totalEnergyTraded)
+	// Apply balances
+	for _, b := range qualifiedBuyers {
+		q := buyerCaps[b.Index]
+		if q <= 0 { continue }
+		idx := b.Index
+		cost := new(big.Int).Mul(clearingPrice, big.NewInt(q))
+		outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, cost)
+		outputs[idx].Energy = new(big.Int).Add(outputs[idx].Energy, big.NewInt(q))
+		totalCoinsTraded += cost.Int64()
+	}
+	for _, s := range qualifiedSellers {
+		q := sellerCaps[s.Index]
+		if q <= 0 { continue }
+		idx := s.Index
+		rev := new(big.Int).Mul(clearingPrice, big.NewInt(q))
+		outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, rev)
+		outputs[idx].Energy = new(big.Int).Sub(outputs[idx].Energy, big.NewInt(q))
+	}
 
 	return &AuctionExecutionResult{
-		Outputs:              outputs,
-		AuctioneerNote:       auctioneerNote,
-		ClearingPrice:        clearingPrice,
-		MarginalBuyerPrice:   marginalBuyerPrice,
-		MarginalSellerPrice:  marginalSellerPrice,
-		AuctioneerCommission: totalCommission,
-		TotalEnergyTraded:    totalEnergyTraded,
-		TotalCoinsTraded:     totalCoinsTraded,
-		QualifiedBuyers:      qualifiedBuyers,
-		QualifiedSellers:     qualifiedSellers,
+		Outputs:             outputs,
+		ClearingPrice:       clearingPrice,
+		MarginalBuyerPrice:  bMarg,
+		MarginalSellerPrice: aMarg,
+		TotalEnergyTraded:   tradedTotal,
+		TotalCoinsTraded:    totalCoinsTraded,
+		QualifiedBuyers:     len(qualifiedBuyers),
+		QualifiedSellers:    len(qualifiedSellers),
 	}
 }
 
 // RunAuctionLogic is a backward-compatible wrapper that returns only the outputs
 func RunAuctionLogic(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) []DecryptedRegistration {
-	result := RunAuctionLogicWithCommission(inputs, roles)
+	result := RunAuctionLogicUniform(inputs, roles)
 	return result.Outputs
 }
 
 // GetAllOutputsIncludingAuctioneer returns all outputs (N participants + 1 auctioneer)
 // This is the complete set of outputs that should be used for conservation checks
 func (result *AuctionExecutionResult) GetAllOutputsIncludingAuctioneer() []DecryptedRegistration {
-	allOutputs := make([]DecryptedRegistration, len(result.Outputs)+1)
+	allOutputs := make([]DecryptedRegistration, len(result.Outputs))
 	copy(allOutputs, result.Outputs)
-	allOutputs[len(result.Outputs)] = *result.AuctioneerNote
 	return allOutputs
 }
 
 // GetTotalOutputCount returns the total number of output notes (N + 1)
 func (result *AuctionExecutionResult) GetTotalOutputCount() int {
-	return len(result.Outputs) + 1 // N participants + 1 auctioneer
+	return len(result.Outputs)
 }
 
-// createAuctioneerNote creates a proper auctioneer commission note for conservation
-// This follows the EXACT same cryptographic construction as participant notes in zerocash.NewNote
-func createAuctioneerNote(auctioneerSk *big.Int, commissionCoins *big.Int, clearingPrice *big.Int, unitsTraded int64) *DecryptedRegistration {
-	// If no auctioneer secret key provided, create a deterministic one based on auction state
-	if auctioneerSk == nil {
-		// Create deterministic auctioneer key based on auction parameters for consistency
-		auctioneerSk = new(big.Int).Add(commissionCoins, clearingPrice)
-		if auctioneerSk.Cmp(big.NewInt(0)) == 0 {
-			auctioneerSk = big.NewInt(1) // Minimum value for valid key
-		}
-	}
-
-	// RIGOROUS CRYPTOGRAPHIC CONSTRUCTION (same as zerocash.NewNote):
-
-	// Step 1: Generate cryptographically secure randomness
-	rho := zerocash.RandomBytes(32)
-	rand := zerocash.RandomBytes(32)
-
-	// Step 2: Compute public key: pk = H(sk) following zerocash protocol
-	mimcHash := func(data *big.Int) *big.Int {
-		h := mimcNative.NewMiMC()
-		if data != nil {
-			h.Write(data.Bytes())
-		}
-		result := h.Sum(nil)
-		return new(big.Int).SetBytes(result)
-	}
-
-	auctioneerPkOwner := mimcHash(auctioneerSk)
-
-	// Step 3: Compute commitment following zerocash paper: cm = Com(Γ || pk || ρ, r)
-	// where Γ = (coins, energy), pk is public key, ρ is rho, r is randomness
-	commisionCommitment := zerocash.Commitment(
-		commissionCoins,             // Γ.coins (commission earned)
-		big.NewInt(0),               // Γ.energy (auctioneer doesn't trade energy)
-		auctioneerPkOwner.Bytes(),   // pk (auctioneer public key)
-		new(big.Int).SetBytes(rho),  // ρ (rho)
-		new(big.Int).SetBytes(rand), // r (randomness)
-	)
-
-	// Step 4: Create actual zerocash.Note structure (not just DecryptedRegistration)
-	auctioneerNote := &zerocash.Note{
-		Value: zerocash.Gamma{
-			Coins:  commissionCoins, // Commission collected
-			Energy: big.NewInt(0),   // Auctioneer doesn't trade energy
-		},
-		PkOwner: auctioneerPkOwner.Bytes(), // Proper public key
-		Rho:     rho,                       // Cryptographically secure randomness
-		Rand:    rand,                      // Cryptographically secure randomness
-		Cm:      commisionCommitment,       // Proper MiMC commitment
-	}
-
-	// Step 5: Serial number computation (for future spend prevention - currently not used in DecryptedRegistration)
-	// auctioneerSerialNumber := zerocash.SerialNumber(auctioneerSk.Bytes(), rho)
-
-	// Step 6: Return DecryptedRegistration with FULL cryptographic backing
-	return &DecryptedRegistration{
-		PkOut:    auctioneerPkOwner,       // Proper cryptographic public key
-		SkIn:     auctioneerSk,            // Auctioneer secret key
-		Price:    clearingPrice,           // Record the clearing price
-		Quantity: big.NewInt(unitsTraded), // Record total units traded
-		Coins:    commissionCoins,         // Commission earned
-		Energy:   big.NewInt(0),           // Auctioneer doesn't trade energy
-		NoteData: auctioneerNote,          // **CRITICAL: ACTUAL ZEROCASH NOTE**
-		// Additional fields for full protocol compliance:
-		// SerialNumber: auctioneerSerialNumber (if we add this field to DecryptedRegistration)
-	}
-}
+// (createAuctioneerNote removed: commission is no longer supported)
 
 /*
 // COMMENTED OUT: Original auction logic (not correct, will be reworked later)
@@ -931,25 +655,9 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		return result
 	}
 
-	// ==== POPULATE AUCTION PARAMETERS ====
-	circuit.ClearingPrice = toVar(auctionExecution.ClearingPrice)
-	// TotalEnergyTraded and TotalCommission are now computed in the circuit
-
-	// Calculate commission per unit
-	var commissionPerUnit *big.Int
-	if auctionExecution.TotalEnergyTraded > 0 {
-		commissionPerUnit = new(big.Int).Div(auctionExecution.AuctioneerCommission, big.NewInt(auctionExecution.TotalEnergyTraded))
-	} else {
-		commissionPerUnit = big.NewInt(0)
-	}
-	circuit.CommissionPerUnit = toVar(commissionPerUnit)
-
-	// Use REAL marginal prices from auction execution (not calculated ones!)
-	circuit.MarginalBuyerPrice = toVar(auctionExecution.MarginalBuyerPrice)
-	circuit.MarginalSellerPrice = toVar(auctionExecution.MarginalSellerPrice)
-
-	// Note: ParticipantRoles and TradedQuantities are now decrypted from registration data
-	// as DecVal[i][5] (role) and DecVal[i][6] (quantity), so no need to set them here.
+	// Note: Auction verification removed from circuit - only cryptographic consistency is verified
+	// ParticipantRoles and TradedQuantities are available as DecVal[i][5] (role) and DecVal[i][6] (quantity)
+	// but are not verified by the circuit.
 
 	// Helper to compute MiMC hash (same as circuit)
 	mimcHash := func(data ...*big.Int) *big.Int {
@@ -1318,87 +1026,32 @@ func ExchangePhaseWithNotes(
 		return nil, nil, nil, fmt.Errorf("failed to sort participants for circuit: %w", err)
 	}
 
-	// 5. Run auction logic with sorted data - sophisticated sealed-bid double auction mechanism
-	auctionExecution := RunAuctionLogicWithCommissionAndAuctioneer(sortedInputs, roles, auctioneerSk)
+	// 5. Run auction logic (uniform, no commission)
+	auctionExecution := RunAuctionLogicUniform(sortedInputs, roles)
 	outputs := auctionExecution.Outputs
 
 	// 6. Build witness using the dynamic circuit approach with sorted data
-	// Convert auctioneerDHPk from *bls12377.G1Affine to *sw_bls12377.G1Affine
-	swAuctioneerDHPk := &sw_bls12377.G1Affine{
-		X: auctioneerDHPk.X.String(),
-		Y: auctioneerDHPk.Y.String(),
-	}
+	swAuctioneerDHPk := &sw_bls12377.G1Affine{X: auctioneerDHPk.X.String(), Y: auctioneerDHPk.Y.String()}
 	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk, auctionExecution, roles)
 	proof, err = GenerateProofFN(witness, pk, ccs)
-
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	if err != nil { return nil, nil, nil, err }
 
 	// 7. Create structured output
 	timestamp := time.Now().Unix()
-
-	// Calculate totals from inputs
 	totalCoins := big.NewInt(0)
 	totalEnergy := big.NewInt(0)
 	highestBid := big.NewInt(0)
 	winnerID := ""
-
 	for i, input := range inputs {
-		if input.Coins != nil {
-			totalCoins.Add(totalCoins, input.Coins)
-		}
-		if input.Energy != nil {
-			totalEnergy.Add(totalEnergy, input.Energy)
-		}
+		if input.Coins != nil { totalCoins.Add(totalCoins, input.Coins) }
+		if input.Energy != nil { totalEnergy.Add(totalEnergy, input.Energy) }
 		if input.Price != nil && input.Price.Cmp(highestBid) > 0 {
-			highestBid.Set(input.Price)
-			winnerID = fmt.Sprintf("Participant%d", i+1)
+			highestBid.Set(input.Price); winnerID = fmt.Sprintf("Participant%d", i+1)
 		}
 	}
-
-	// Create proof hash for verification
 	proofHash := fmt.Sprintf("%x", sha256.Sum256(proof))
-
-	// Create auction result
-	auctionResult := &AuctionResult{
-		WinnerID:    winnerID,
-		WinningBid:  highestBid,
-		TotalBids:   len(inputs),
-		TotalCoins:  totalCoins,
-		TotalEnergy: totalEnergy,
-		Timestamp:   timestamp,
-		ProofHash:   proofHash,
-	}
-
-	// Create exchange transaction output including auctioneer commission
-	exchangeTx := &ExchangeTransaction{
-		Participants: len(inputs),
-		Inputs:       inputs,
-		Outputs:      outputs,
-		TotalValue:   totalCoins,
-		TotalEnergy:  totalEnergy,
-		Timestamp:    timestamp,
-		ProofData:    proof,
-	}
-
-	// Add auctioneer commission info to auction result
-	auctionResult.TotalCoins = new(big.Int).Add(auctionResult.TotalCoins, auctionExecution.AuctioneerCommission)
-
-	// Log commission collection
-	if auctionExecution.AuctioneerCommission.Cmp(big.NewInt(0)) > 0 {
-		fmt.Printf("💰 Auctioneer commission collected: %v coins\n", auctionExecution.AuctioneerCommission)
-	}
-
-	// 8. Return structured results (include auction execution result for commission info)
-	// Create composite result that includes both auction result and execution details
-	compositeResult := struct {
-		AuctionResult    *AuctionResult
-		AuctionExecution *AuctionExecutionResult
-	}{
-		AuctionResult:    auctionResult,
-		AuctionExecution: auctionExecution,
-	}
-
+	auctionResult := &AuctionResult{ WinnerID: winnerID, WinningBid: highestBid, TotalBids: len(inputs), TotalCoins: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofHash: proofHash }
+	exchangeTx := &ExchangeTransaction{ Participants: len(inputs), Inputs: inputs, Outputs: outputs, TotalValue: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofData: proof }
+	compositeResult := struct { AuctionResult *AuctionResult; AuctionExecution *AuctionExecutionResult }{ AuctionResult: auctionResult, AuctionExecution: auctionExecution }
 	return exchangeTx, compositeResult, proof, nil
 }
