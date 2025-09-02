@@ -303,6 +303,12 @@ func main() {
 	// Setup logger
 	logger.Setup(verbosity)
 
+	// Initialize RISC Zero configuration
+	if err := risc0.InitializeConfig("ppem.config.json"); err != nil {
+		logger.Debugf("Warning: could not initialize RISC0 config: %v", err)
+		// Continue with defaults
+	}
+
 	// Validate input parameters
 	if numParticipants <= 0 {
 		printError("Invalid Configuration", fmt.Sprintf("Participants must be positive, got %d", numParticipants))
@@ -324,6 +330,9 @@ func main() {
 			printError("Scenario Loading", fmt.Sprintf("Failed to load %s: %s", scenarioFile, err.Error()))
 		}
 	}
+
+	// Set the scenario file path for RISC Zero to use
+	risc0.SetScenarioFile(scenarioFile)
 
 	// Apply withdrawal flags to configuration (overrides scenario defaults)
 	if withdrawAll {

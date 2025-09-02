@@ -1,0 +1,158 @@
+{
+  "scenario_name": "Generated_PPEM_Auction_N15",
+  "description": "Generated PPEM auction with 15 participants (7 buyers, 8 sellers)",
+  "expected_clearing_price": 52,
+  "expected_total_energy_traded": 114,
+  "participants": [
+    {
+      "id": 0,
+      "role": 0,
+      "price": 61,
+      "quantity": 21,
+      "in_coin": 3905,
+      "in_energy": 140,
+      "out_coin": 2813,
+      "out_energy": 161
+    },
+    {
+      "id": 1,
+      "role": 0,
+      "price": 66,
+      "quantity": 16,
+      "in_coin": 3561,
+      "in_energy": 155,
+      "out_coin": 2729,
+      "out_energy": 171
+    },
+    {
+      "id": 2,
+      "role": 0,
+      "price": 53,
+      "quantity": 15,
+      "in_coin": 2279,
+      "in_energy": 155,
+      "out_coin": 1499,
+      "out_energy": 170
+    },
+    {
+      "id": 3,
+      "role": 0,
+      "price": 53,
+      "quantity": 8,
+      "in_coin": 1707,
+      "in_energy": 105,
+      "out_coin": 1291,
+      "out_energy": 113
+    },
+    {
+      "id": 4,
+      "role": 0,
+      "price": 62,
+      "quantity": 21,
+      "in_coin": 3241,
+      "in_energy": 141,
+      "out_coin": 2149,
+      "out_energy": 162
+    },
+    {
+      "id": 5,
+      "role": 0,
+      "price": 67,
+      "quantity": 14,
+      "in_coin": 2826,
+      "in_energy": 80,
+      "out_coin": 2098,
+      "out_energy": 94
+    },
+    {
+      "id": 6,
+      "role": 0,
+      "price": 61,
+      "quantity": 19,
+      "in_coin": 2962,
+      "in_energy": 152,
+      "out_coin": 1974,
+      "out_energy": 171
+    },
+    {
+      "id": 7,
+      "role": 1,
+      "price": 50,
+      "quantity": 13,
+      "in_coin": 2709,
+      "in_energy": 132,
+      "out_coin": 3385,
+      "out_energy": 119
+    },
+    {
+      "id": 8,
+      "role": 1,
+      "price": 44,
+      "quantity": 16,
+      "in_coin": 1309,
+      "in_energy": 97,
+      "out_coin": 2141,
+      "out_energy": 81
+    },
+    {
+      "id": 9,
+      "role": 1,
+      "price": 44,
+      "quantity": 16,
+      "in_coin": 2788,
+      "in_energy": 83,
+      "out_coin": 3620,
+      "out_energy": 67
+    },
+    {
+      "id": 10,
+      "role": 1,
+      "price": 49,
+      "quantity": 20,
+      "in_coin": 1280,
+      "in_energy": 154,
+      "out_coin": 2320,
+      "out_energy": 134
+    },
+    {
+      "id": 11,
+      "role": 1,
+      "price": 51,
+      "quantity": 25,
+      "in_coin": 1766,
+      "in_energy": 168,
+      "out_coin": 3066,
+      "out_energy": 143
+    },
+    {
+      "id": 12,
+      "role": 1,
+      "price": 60,
+      "quantity": 10,
+      "in_coin": 1054,
+      "in_energy": 165,
+      "out_coin": 1054,
+      "out_energy": 165
+    },
+    {
+      "id": 13,
+      "role": 1,
+      "price": 47,
+      "quantity": 24,
+      "in_coin": 2207,
+      "in_energy": 198,
+      "out_coin": 3455,
+      "out_energy": 174
+    },
+    {
+      "id": 14,
+      "role": 1,
+      "price": 56,
+      "quantity": 6,
+      "in_coin": 2279,
+      "in_energy": 126,
+      "out_coin": 2279,
+      "out_energy": 126
+    }
+  ]
+}

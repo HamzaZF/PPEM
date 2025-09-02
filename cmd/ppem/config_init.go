@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"implementation/internal/config"
 	"implementation/internal/risc0"

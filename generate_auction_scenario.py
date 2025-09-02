@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Auction Scenario Generator for PPEM
-Generates realistic auction scenarios with guaranteed market intersection
+Generates realistic auction scenarios with guaranteed market intersection (for testing purposes)
 """
 
 import json
@@ -214,7 +214,7 @@ class AuctionScenarioGenerator:
         print(f"\nMarket Balance:")
         print(f"  Total Demand: {total_demand} units")
         print(f"  Total Supply: {total_supply} units")
-        print(f"  Balance: {'✅ Balanced' if total_demand == total_supply else '❌ Unbalanced'}")
+        print(f"  Balance: {'Balanced' if total_demand == total_supply else 'Unbalanced'}")
 
 
 def main():
@@ -257,8 +257,8 @@ def main():
     if not args.quiet:
         generator.print_summary(scenario)
     
-    print(f"\n✅ Successfully generated scenario with {args.participants} participants")
-    print(f"📁 Saved to: {output_file}")
+    print(f"\nSuccessfully generated scenario with {args.participants} participants")
+    print(f"Saved to: {output_file}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	logger "implementation/internal/logging"
@@ -80,15 +79,25 @@ type RISC0ProofData struct {
 	RawPublicSignalsJSON []byte
 }
 
+// scenarioFilePath holds the global scenario file path
+var scenarioFilePath string
+
+// SetScenarioFile sets the scenario file path globally  
+func SetScenarioFile(filePath string) {
+	scenarioFilePath = filePath
+}
+
 // GenerateRISC0Proof generates a RISC Zero proof and converts it via Circom to gnark format
 func GenerateRISC0Proof(participants []Participant, clearingPrice *big.Int, totalEnergyTraded int64) (*RISC0ProofData, error) {
+	if scenarioFilePath == "" {
+		return nil, fmt.Errorf("scenario file path not set - call risc0.SetScenarioFile() first")
+	}
 	// Get current working directory to establish absolute paths
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	risc0Dir := filepath.Join(pwd, "risc0")
 	circomDir := filepath.Join(pwd, "circom")
 
 	// // Initialize cache managers
@@ -107,9 +116,9 @@ func GenerateRISC0Proof(participants []Participant, clearingPrice *big.Int, tota
 	// 	return nil, fmt.Errorf("failed to setup Circom: %w", err)
 	// }
 
-	// Step 3: Run RISC Zero with auction data
-	logger.Debugf("RISC0: running double auction...\n")
-	if err := runRISC0WithData(participants, clearingPrice, totalEnergyTraded, risc0Dir, circomDir); err != nil {
+	// Step 3: Run RISC Zero with the provided scenario file
+	logger.Debugf("RISC0: running double auction with scenario: %s\n", scenarioFilePath)
+	if err := runRISC0WithScenarioFile(scenarioFilePath); err != nil {
 		return nil, fmt.Errorf("failed to run RISC Zero auction: %w", err)
 	}
 
@@ -134,213 +143,14 @@ func GenerateRISC0Proof(participants []Participant, clearingPrice *big.Int, tota
 
 // runRISC0WithData runs the RISC Zero program with auction scenario data using cargo run --release
 func runRISC0WithData(participants []Participant, clearingPrice *big.Int, totalEnergyTraded int64, risc0Dir, circomDir string) error {
-	// Create auction scenario
-	scenario := AuctionScenario{
-		ScenarioName:              "PPEM_Auction",
-		Description:               "Privacy-Preserving Energy Market Auction",
-		ExpectedClearingPrice:     clearingPrice.Uint64(),
-		ExpectedTotalEnergyTraded: uint64(totalEnergyTraded),
-		Participants:              participants,
-	}
-
-	// Create temporary scenario file
-	scenarioData, err := json.MarshalIndent(scenario, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal scenario: %w", err)
-	}
-
-	scenarioPath := filepath.Join(risc0Dir, "auction_scenario.json")
-	if err := os.WriteFile(scenarioPath, scenarioData, 0644); err != nil {
-		return fmt.Errorf("failed to write scenario file: %w", err)
-	}
-
-	logger.Debugf("RISC0: running with scenario file: %s", scenarioPath)
-
-	// Run RISC Zero program using cargo run --release
-	cmd := exec.Command("cargo", "run", "--release", "--", scenarioPath)
-	cmd.Dir = risc0Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	logger.Debugf("RISC0: executing command: cargo run --release -- %s", scenarioPath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("RISC Zero execution failed: %w", err)
-	}
-
-	// Copy generated input.json to circom directory
-	inputJsonPath := filepath.Join(risc0Dir, "input.json")
-	circomInputPath := filepath.Join(circomDir, "input.json")
-
-	// Check if input.json was generated
-	if _, err := os.Stat(inputJsonPath); os.IsNotExist(err) {
-		return fmt.Errorf("RISC Zero did not generate input.json at %s", inputJsonPath)
-	}
-
-	inputData, err := os.ReadFile(inputJsonPath)
-	if err != nil {
-		return fmt.Errorf("failed to read RISC Zero input.json: %w", err)
-	}
-
-	if err := os.WriteFile(circomInputPath, inputData, 0644); err != nil {
-		return fmt.Errorf("failed to write circom input.json: %w", err)
-	}
-
-	logger.Debugf("RISC0: copied input.json to circom directory: %s", circomInputPath)
-	return nil
+	// This function is deprecated - scenario file should be passed directly
+	return fmt.Errorf("runRISC0WithData is deprecated - use runRISC0WithScenarioFile instead")
 }
 
 // runCircomProofGeneration runs the Circom proof generation workflow directly in Go
 func runCircomProofGeneration(circomDir string) error {
-	// Create circom_data directory if it doesn't exist
-	circomDataDir := filepath.Join(circomDir, "circom_data")
-	if err := os.MkdirAll(circomDataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create circom_data directory: %w", err)
-	}
-
-	// Define required files and paths
-	starkVerifyExe := filepath.Join(circomDir, "stark_verify")
-	proverExe := filepath.Join(circomDir, "prover")
-	inputJsonPath := filepath.Join(circomDir, "input.json")
-	witnessPath := filepath.Join(circomDir, "witness.wtns")
-	zkeyPath := filepath.Join(circomDir, "stark_verify_final.zkey")
-	proofPath := filepath.Join(circomDir, "proof.json")
-	publicPath := filepath.Join(circomDir, "public.json")
-	vkeyPath := filepath.Join(circomDir, "vkey.json")
-
-	// Final output paths in circom_data
-	finalProofPath := filepath.Join(circomDataDir, "proof.json")
-	finalVkeyPath := filepath.Join(circomDataDir, "vkey.json")
-	finalPublicSignalsPath := filepath.Join(circomDataDir, "public_signals.json")
-
-	// Check required files exist
-	requiredFiles := []string{starkVerifyExe, proverExe, inputJsonPath, zkeyPath}
-	for _, file := range requiredFiles {
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			return fmt.Errorf("required file not found: %s", file)
-		}
-	}
-
-	// Make executables executable
-	if err := os.Chmod(starkVerifyExe, 0755); err != nil {
-		return fmt.Errorf("failed to make stark_verify executable: %w", err)
-	}
-	if err := os.Chmod(proverExe, 0755); err != nil {
-		return fmt.Errorf("failed to make prover executable: %w", err)
-	}
-
-	// Step 1: Run stark_verify to generate witness if needed (idempotent)
-	needWitness := true
-	if wfi, err := os.Stat(witnessPath); err == nil {
-		if ifi, err2 := os.Stat(inputJsonPath); err2 == nil {
-			if !ifi.ModTime().After(wfi.ModTime()) {
-				needWitness = false
-			}
-		}
-	}
-	if needWitness {
-		logger.Debugf("Circom: Running stark_verify to generate witness...")
-		cmd1 := exec.Command("./stark_verify", "input.json", "witness.wtns")
-		cmd1.Dir = circomDir
-		cmd1.Stdout = os.Stdout
-		cmd1.Stderr = os.Stderr
-		if err := cmd1.Run(); err != nil {
-			return fmt.Errorf("stark_verify failed: %w", err)
-		}
-	} else {
-		logger.Debugf("Circom: witness.wtns is up-to-date; skipping stark_verify")
-	}
-
-	// Ensure witness exists
-	if _, err := os.Stat(witnessPath); os.IsNotExist(err) {
-		return fmt.Errorf("witness.wtns was not generated by stark_verify")
-	}
-
-	// Step 2: Run prover (rapidsnark) if needed (idempotent)
-	needProof := true
-	if pfi, err := os.Stat(proofPath); err == nil {
-		if pubfi, err2 := os.Stat(publicPath); err2 == nil {
-			if wfi, err3 := os.Stat(witnessPath); err3 == nil {
-				if zfi, err4 := os.Stat(zkeyPath); err4 == nil {
-					// regenerate if witness or zkey newer than proof/public
-					if !(wfi.ModTime().After(pfi.ModTime()) || wfi.ModTime().After(pubfi.ModTime()) ||
-						zfi.ModTime().After(pfi.ModTime()) || zfi.ModTime().After(pubfi.ModTime())) {
-						needProof = false
-					}
-				}
-			}
-		}
-	}
-	if needProof {
-		logger.Debugf("Circom: Running prover (rapidsnark) to generate proof...")
-		cmd2 := exec.Command("./prover", "stark_verify_final.zkey", "witness.wtns", "proof.json", "public.json")
-		cmd2.Dir = circomDir
-		cmd2.Stdout = os.Stdout
-		cmd2.Stderr = os.Stderr
-		if err := cmd2.Run(); err != nil {
-			return fmt.Errorf("prover (rapidsnark) failed: %w", err)
-		}
-		// Check if proof files were generated
-		if _, err := os.Stat(proofPath); os.IsNotExist(err) {
-			return fmt.Errorf("proof.json was not generated by prover")
-		}
-		if _, err := os.Stat(publicPath); os.IsNotExist(err) {
-			return fmt.Errorf("public.json was not generated by prover")
-		}
-	} else {
-		logger.Debugf("Circom: proof.json/public.json are up-to-date; skipping proving")
-	}
-
-	// Step 3: Export verification key from zkey using snarkjs if missing or stale (idempotent)
-	needVKey := true
-	if vfi, err := os.Stat(vkeyPath); err == nil {
-		if zfi, err2 := os.Stat(zkeyPath); err2 == nil {
-			if !zfi.ModTime().After(vfi.ModTime()) {
-				needVKey = false
-			}
-		}
-	}
-	if needVKey {
-		logger.Debugf("Circom: Exporting verification key from zkey via snarkjs...")
-		cmd3 := exec.Command("snarkjs", "zkey", "export", "verificationkey", "stark_verify_final.zkey", "vkey.json")
-		cmd3.Dir = circomDir
-		cmd3.Stdout = os.Stdout
-		cmd3.Stderr = os.Stderr
-		if err := cmd3.Run(); err != nil {
-			return fmt.Errorf("verification key export failed: %w", err)
-		}
-	}
-
-	logger.Debugf("Circom: Step 4 - Syncing files to circom_data folder...")
-	// Step 4: Copy files to circom_data directory
-	filesToCopy := map[string]string{
-		proofPath:  finalProofPath,
-		vkeyPath:   finalVkeyPath,
-		publicPath: finalPublicSignalsPath,
-	}
-
-	for src, dst := range filesToCopy {
-		if _, err := os.Stat(src); err == nil {
-			data, err := os.ReadFile(src)
-			if err != nil {
-				return fmt.Errorf("failed to read %s: %w", src, err)
-			}
-			if err := os.WriteFile(dst, data, 0644); err != nil {
-				return fmt.Errorf("failed to write %s: %w", dst, err)
-			}
-			logger.Debugf("  ✓ Copied %s", filepath.Base(dst))
-		}
-	}
-
-	// Step 5: Verify all required files are in circom_data
-	requiredOutputFiles := []string{finalProofPath, finalVkeyPath, finalPublicSignalsPath}
-	for _, file := range requiredOutputFiles {
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			return fmt.Errorf("required output file missing: %s", file)
-		}
-	}
-
-	logger.Debugf("✓ All required files generated successfully in circom_data/")
-	return nil
+	// Use the configuration-aware version
+	return runCircomProofGenerationConfig()
 }
 
 // ParseCircomProofData parses the JSON files from circom and converts them to gnark recursion format

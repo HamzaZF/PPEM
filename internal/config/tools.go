@@ -138,14 +138,24 @@ func (tc *ToolConfig) GetCargoCommand(args ...string) *exec.Cmd {
 
 // GetStarkVerifyCommand returns exec.Cmd for stark_verify
 func (tc *ToolConfig) GetStarkVerifyCommand(inputJSON, outputWTNS string) *exec.Cmd {
-	cmd := exec.Command(tc.StarkVerifyPath, inputJSON, outputWTNS)
+	// If path is relative to circom dir, use just the binary name when running from circom dir
+	binaryPath := tc.StarkVerifyPath
+	if tc.StarkVerifyPath == "./circom/stark_verify" {
+		binaryPath = "./stark_verify"
+	}
+	cmd := exec.Command(binaryPath, inputJSON, outputWTNS)
 	cmd.Dir = tc.CircomDir
 	return cmd
 }
 
 // GetProverCommand returns exec.Cmd for rapidsnark prover
 func (tc *ToolConfig) GetProverCommand(zkeyPath, witnessPath, proofPath, publicPath string) *exec.Cmd {
-	cmd := exec.Command(tc.ProverPath, zkeyPath, witnessPath, proofPath, publicPath)
+	// If path is relative to circom dir, use just the binary name when running from circom dir
+	binaryPath := tc.ProverPath
+	if tc.ProverPath == "./circom/prover" {
+		binaryPath = "./prover"
+	}
+	cmd := exec.Command(binaryPath, zkeyPath, witnessPath, proofPath, publicPath)
 	cmd.Dir = tc.CircomDir
 	return cmd
 }

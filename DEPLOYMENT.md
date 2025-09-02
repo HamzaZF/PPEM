@@ -1,202 +1,150 @@
-# PPEM-Final Deployment Guide
+# PPEM Deployment Guide
 
-## Table of Contents
-1. [Quick Start](#quick-start)
-2. [Production Deployment](#production-deployment)
-3. [Cloud Deployment](#cloud-deployment)
-4. [Monitoring & Maintenance](#monitoring--maintenance)
-5. [Troubleshooting](#troubleshooting)
+## Overview
 
-## Quick Start
+PPEM is a privacy-preserving energy market system that requires significant computational resources and specific cryptographic dependencies for production deployment.
 
-### Local Development
+## System Requirements
+
+### Hardware Requirements
+- **CPU**: 8+ cores (x86_64 or ARM64)
+- **Memory**: 32GB RAM minimum (64GB recommended)
+- **Storage**: 100GB available disk space
+- **Network**: Enhanced networking for cloud deployments
+
+### Software Dependencies
+- **Operating System**: Ubuntu 22.04 LTS or CentOS 8+
+- **Go**: Version 1.21 or higher
+- **Rust**: Version 1.70 or higher
+- **Node.js**: Version 16 or higher
+- **System packages**: build-essential, cmake, libgmp-dev, nlohmann-json3-dev, nasm
+
+## Installation
+
+### Automated Installation
 ```bash
-# 1. Install dependencies
-./scripts/install_dependencies.sh
-
-# 2. Setup project
-./scripts/setup.sh
-
-# 3. Run
-./ppem
-```
-
-### Docker Deployment
-```bash
-# Build and run with Docker
-docker-compose up -d
-```
-
-## Production Deployment
-
-### Prerequisites Checklist
-
-- [ ] Ubuntu 22.04 LTS or similar
-- [ ] 32GB RAM minimum
-- [ ] 100GB available disk space
-- [ ] Git with LFS support
-- [ ] Docker & Docker Compose (optional)
-
-### Step-by-Step Production Setup
-
-#### 1. System Preparation
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install dependencies
-./scripts/install_dependencies.sh
-
-# Configure system limits
-echo "* soft nofile 65536" | sudo tee -a /etc/security/limits.conf
-echo "* hard nofile 65536" | sudo tee -a /etc/security/limits.conf
-```
-
-#### 2. Clone and Setup
-```bash
-# Clone with LFS
+# Clone repository
 git lfs install
-git clone https://github.com/yourusername/PPEM-Final.git
-cd PPEM-Final
+git clone <repository-url>
+cd PPEM
 
-# Checkout specific version for production
-git checkout tags/v1.0.0
+# Install system dependencies
+./scripts/install_dependencies.sh
 
-# Run setup
-./scripts/setup.sh --non-interactive
+# Complete setup process
+./scripts/setup.sh
 ```
 
-#### 3. Configuration
+### Manual Installation
+
+#### 1. System Dependencies
 ```bash
-# Generate production config
-./scripts/generate_config.sh
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y build-essential cmake libgmp-dev nlohmann-json3-dev nasm git git-lfs
 
-# Edit for production paths
-vim ppem.config.json
-
-# Validate configuration
-./ppem --validate-config
+# RHEL/CentOS
+sudo yum groupinstall -y "Development Tools"
+sudo yum install -y cmake gmp-devel json-devel nasm git git-lfs
 ```
 
-#### 4. Build for Production
+#### 2. Programming Languages
 ```bash
-# Build with optimizations
-CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o ppem ./cmd/ppem
+# Install Go 1.21+
+wget https://go.dev/dl/go1.23.3.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.23.3.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 
-# Build RISC Zero with release mode
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Install Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+#### 3. ZK Tools
+```bash
+# Install Circom
+curl -L https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o circom
+chmod +x circom
+sudo mv circom /usr/local/bin/
+
+# Install SnarkJS
+npm install -g snarkjs@0.7.3
+```
+
+#### 4. Build Cryptographic Components
+```bash
+# Build STARK verifier (30+ minutes)
+./scripts/build_stark_verify.sh
+
+# Build RapidSNARK prover
+./scripts/build_rapidsnark.sh
+
+# Download proving key (3.4GB)
+./scripts/download_proving_key.sh
+```
+
+#### 5. Build Application
+```bash
+# Build RISC Zero components
 cd risc0
 cargo build --release
 cd ..
+
+# Build main application
+go build -o ppem ./cmd/ppem
+
+# Verify installation
+./scripts/verify_setup.sh
 ```
 
-#### 5. Proving Key Setup
+## Configuration
+
+### Tool Configuration
+Create `ppem.config.json`:
+```json
+{
+  "cargo_path": "cargo",
+  "stark_verify_path": "./circom/stark_verify",
+  "prover_path": "./circom/prover",
+  "snarkjs_path": "snarkjs",
+  "risc0_dir": "./risc0",
+  "circom_dir": "./circom"
+}
+```
+
+### Environment Variables
 ```bash
-# Option A: Download pre-generated (faster)
-export PPEM_PROVING_KEY_URL="https://your-cdn.com/stark_verify_final.zkey"
-export PPEM_PROVING_KEY_SHA256="your_sha256_hash_here"
-./scripts/download_proving_key.sh
-
-# Option B: Generate new (more secure)
-./scripts/generate_proving_key.sh
-```
-
-## Cloud Deployment
-
-### AWS EC2
-
-#### Instance Requirements
-- Type: `r5.8xlarge` or larger
-- Storage: 200GB gp3 SSD
-- Network: Enhanced networking enabled
-
-#### Deployment Script
-```bash
-#!/bin/bash
-# deploy_aws.sh
-
-# Install AWS CLI dependencies
-sudo apt install -y awscli
-
-# Pull from S3
-aws s3 cp s3://your-bucket/ppem-release.tar.gz .
-tar -xzf ppem-release.tar.gz
-
-# Start service
-sudo systemctl start ppem
-```
-
-### Kubernetes
-
-```yaml
-# ppem-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ppem
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: ppem
-  template:
-    metadata:
-      labels:
-        app: ppem
-    spec:
-      containers:
-      - name: ppem
-        image: yourdockerhub/ppem-final:latest
-        resources:
-          requests:
-            memory: "16Gi"
-            cpu: "4"
-          limits:
-            memory: "32Gi"
-            cpu: "8"
-        volumeMounts:
-        - name: proving-key
-          mountPath: /app/circom
-          readOnly: true
-      volumes:
-      - name: proving-key
-        persistentVolumeClaim:
-          claimName: ppem-proving-key-pvc
-```
-
-### Docker Swarm
-
-```bash
-# Initialize swarm
-docker swarm init
-
-# Deploy stack
-docker stack deploy -c docker-compose.yml ppem-stack
-
-# Scale service
-docker service scale ppem-stack_ppem=5
-```
-
-## Environment Variables
-
-```bash
-# Core Configuration
-export PPEM_CONFIG=/etc/ppem/config.json
-export PPEM_LOG_LEVEL=info
-export PPEM_DATA_DIR=/var/lib/ppem
-
-# Tool Paths (override defaults)
-export PPEM_CARGO_PATH=/usr/local/bin/cargo
+# Override tool paths if needed
 export PPEM_STARK_VERIFY_PATH=/opt/ppem/bin/stark_verify
 export PPEM_PROVER_PATH=/opt/ppem/bin/prover
+export PPEM_SNARKJS_PATH=/usr/local/bin/snarkjs
 
-# Performance Tuning
-export RUST_BACKTRACE=1
+# Performance tuning
 export RAYON_NUM_THREADS=16
 export GOMAXPROCS=16
 ```
 
-## Systemd Service
+## Production Deployment
 
+### Binary Distribution
+```bash
+# Build optimized binary
+CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o ppem ./cmd/ppem
+
+# Create distribution package
+tar -czf ppem-deployment.tar.gz \
+  ppem \
+  ppem.config.json \
+  circom/ \
+  risc0/target/release/ \
+  scenarios/
+```
+
+### Systemd Service
 ```ini
 # /etc/systemd/system/ppem.service
 [Unit]
@@ -204,180 +152,170 @@ Description=PPEM Privacy-Preserving Energy Market
 After=network.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=ppem
 Group=ppem
 WorkingDirectory=/opt/ppem
-ExecStart=/opt/ppem/ppem
-ExecReload=/bin/kill -HUP $MAINPID
-Restart=on-failure
-RestartSec=10
+ExecStart=/opt/ppem/ppem -scenario /opt/ppem/scenarios/auction_scenario_N10.json
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ppem
 
-# Security
+# Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/ppem
+ReadOnlyPaths=/opt/ppem
+ReadWritePaths=/var/log/ppem
 
-# Resource Limits
+# Resource limits
 LimitNOFILE=65536
-LimitNPROC=4096
 MemoryLimit=32G
+CPUQuota=800%
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+Enable service:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable ppem
-sudo systemctl start ppem
-sudo systemctl status ppem
 ```
 
-## Monitoring & Maintenance
+### Container Deployment
+```dockerfile
+FROM ubuntu:22.04
 
-### Health Checks
+RUN apt-get update && apt-get install -y \
+    build-essential cmake libgmp-dev \
+    && rm -rf /var/lib/apt/lists/*
 
+COPY ppem /usr/local/bin/
+COPY ppem.config.json /etc/ppem/
+COPY circom/ /opt/ppem/circom/
+COPY scenarios/ /opt/ppem/scenarios/
+
+WORKDIR /opt/ppem
+USER nobody
+
+CMD ["ppem", "-scenario", "scenarios/auction_scenario_N10.json"]
+```
+
+## Monitoring and Troubleshooting
+
+### Verification Commands
 ```bash
-# Check service status
-curl http://localhost:8080/health
-
-# Verify setup
+# Check system dependencies
 ./scripts/verify_setup.sh
 
-# Check logs
-journalctl -u ppem -f
+# Test with small scenario
+./ppem -scenario scenarios/auction_scenario_N10.json -verbosity debug
+
+# Check binary sizes and permissions
+ls -lh circom/stark_verify circom/prover circom/stark_verify_final.zkey
 ```
-
-### Prometheus Metrics
-
-```yaml
-# prometheus.yml
-scrape_configs:
-  - job_name: 'ppem'
-    static_configs:
-      - targets: ['localhost:8080']
-    metrics_path: '/metrics'
-```
-
-### Backup Strategy
-
-```bash
-#!/bin/bash
-# backup.sh
-
-# Backup configuration
-tar -czf ppem-config-$(date +%Y%m%d).tar.gz \
-  ppem.config.json \
-  circom/vkey.json
-
-# Backup data
-rsync -av /var/lib/ppem/ /backup/ppem/
-
-# Backup to S3
-aws s3 sync /backup/ppem/ s3://your-backup-bucket/ppem/
-```
-
-## Troubleshooting
 
 ### Common Issues
 
-#### "stark_verify: cannot execute binary file"
-**Cause**: Architecture mismatch
-**Solution**: Rebuild for your architecture
+**Binary not found**
 ```bash
-./scripts/build_stark_verify.sh
+# Check PATH configuration
+which stark_verify prover snarkjs
+
+# Regenerate configuration
+./scripts/generate_config.sh
 ```
 
-#### "Out of memory"
-**Cause**: Insufficient RAM for proof generation
-**Solution**: Increase system RAM or use swap
+**Out of memory errors**
 ```bash
+# Add swap space
 sudo fallocate -l 32G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
 ```
 
-#### "Tool not found"
-**Cause**: Incorrect PATH configuration
-**Solution**: Regenerate config
+**Permission denied**
 ```bash
-./scripts/generate_config.sh
-./ppem --validate-config
-```
-
-#### "Proving key not found"
-**Cause**: Missing stark_verify_final.zkey
-**Solution**: Download or generate
-```bash
-./scripts/download_proving_key.sh
-# OR
-./scripts/generate_proving_key.sh
-```
-
-### Debug Mode
-
-```bash
-# Enable debug logging
-export PPEM_LOG_LEVEL=debug
-
-# Run with verbose output
-./ppem --debug --verbose
-
-# Trace execution
-strace -f ./ppem 2> trace.log
+# Fix binary permissions
+chmod +x circom/stark_verify circom/prover
 ```
 
 ### Performance Tuning
-
 ```bash
-# CPU Governor
-sudo cpupower frequency-set -g performance
-
-# Disable swap for performance
-sudo swapoff -a
-
-# Increase file descriptors
-ulimit -n 65536
+# CPU frequency scaling
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
 
 # Memory settings
 echo 1 | sudo tee /proc/sys/vm/overcommit_memory
-echo 90 | sudo tee /proc/sys/vm/dirty_ratio
+echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 ```
 
 ## Security Considerations
 
-1. **Firewall Configuration**
+### File Permissions
 ```bash
-sudo ufw allow 22/tcp  # SSH
-sudo ufw allow 8080/tcp  # PPEM API
-sudo ufw enable
-```
-
-2. **File Permissions**
-```bash
-chmod 700 /opt/ppem
+# Secure configuration files
 chmod 600 ppem.config.json
+
+# Protect proving keys
 chmod 400 circom/stark_verify_final.zkey
+
+# Set proper ownership
+chown -R ppem:ppem /opt/ppem
 ```
 
-3. **Secrets Management**
-- Use environment variables for sensitive data
-- Consider using HashiCorp Vault or AWS Secrets Manager
-- Never commit proving keys to Git
+### Network Security
+- Restrict network access to essential ports only
+- Use TLS for any network communications
+- Implement proper authentication for multi-user environments
 
-## Support
+### Key Management
+- Generate proving keys from trusted sources
+- Verify checksums of downloaded binaries
+- Use separate signing keys for different environments
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/PPEM-Final/issues)
-- **Documentation**: [docs/](./docs/)
-- **Community**: [Discord/Slack]
+## File Inventory
 
----
-*Last updated: September 2024*
+### Critical Files (Required)
+- `ppem` - Main application binary
+- `circom/stark_verify` (142MB) - STARK proof verifier
+- `circom/prover` (500KB) - RapidSNARK Groth16 prover
+- `circom/stark_verify_final.zkey` (3.4GB) - Proving key
+- `risc0/target/release/host` - RISC Zero host binary
+- `ppem.config.json` - Tool configuration
+
+### Scenario Files (Required)
+- `scenarios/auction_scenario_N10.json` - 10-participant test scenario
+- `scenarios/auction_scenario_N15.json` - 15-participant test scenario
+
+### Generated Files (Runtime)
+- `circom/input.json` - RISC Zero output for Circom
+- `circom/witness.wtns` - Circom witness file
+- `circom/proof.json`, `circom/public.json` - Generated proofs
+- `ledger_final.json` - Final protocol state
+- `graphs/*.png` - Auction visualization outputs
+- `exchange_data/*.json` - Detailed auction results
+
+## Support and Maintenance
+
+### Logs and Debugging
+```bash
+# Enable debug mode
+./ppem -scenario scenarios/auction_scenario_N10.json -verbosity debug
+
+# System logs (if using systemd)
+journalctl -u ppem -f
+
+# Resource monitoring
+htop
+iotop
+```
+
+### Updates and Maintenance
+- Monitor for new releases of core dependencies (Go, Rust, Circom)
+- Regenerate proving keys when upgrading cryptographic components
+- Test scenario files after any configuration changes
+- Backup critical files before system updates
+
+For additional support, consult the project repository issues tracker.

@@ -3,7 +3,6 @@ package risc0
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"implementation/internal/config"
@@ -38,38 +37,32 @@ func GetConfig() *config.ToolConfig {
 	return GlobalToolConfig
 }
 
-// runRISC0WithDataConfig is the config-aware version of runRISC0WithData
-func runRISC0WithDataConfig(participants []Participant, clearingPrice *big.Int, totalEnergyTraded int64) error {
+// runRISC0WithScenarioFile runs RISC Zero with the provided scenario file
+func runRISC0WithScenarioFile(scenarioFilePath string) error {
 	cfg := GetConfig()
 	
-	// Create auction scenario
-	scenario := AuctionScenario{
-		ScenarioName:              "PPEM_Auction",
-		Description:               "Privacy-Preserving Energy Market Auction",
-		ExpectedClearingPrice:     clearingPrice.Uint64(),
-		ExpectedTotalEnergyTraded: uint64(totalEnergyTraded),
-		Participants:              participants,
-	}
-	
-	// Create temporary scenario file
-	scenarioData, err := json.MarshalIndent(scenario, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal scenario: %w", err)
-	}
-	
+	// Copy the scenario file to RISC Zero directory
 	scenarioPath := filepath.Join(cfg.Risc0Dir, "auction_scenario.json")
+	
+	// Read the original scenario file
+	scenarioData, err := os.ReadFile(scenarioFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read scenario file %s: %w", scenarioFilePath, err)
+	}
+	
+	// Write it to RISC Zero directory
 	if err := os.WriteFile(scenarioPath, scenarioData, 0644); err != nil {
 		return fmt.Errorf("failed to write scenario file: %w", err)
 	}
 	
 	logger.Debugf("RISC0: running with scenario file: %s", scenarioPath)
 	
-	// Use config to get cargo command
-	cmd := cfg.GetCargoCommand("run", "--release", "--", scenarioPath)
+	// Use config to get cargo command - pass the local filename since cargo runs from risc0/ directory
+	cmd := cfg.GetCargoCommand("run", "--release", "--", "auction_scenario.json")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
-	logger.Debugf("RISC0: executing command: %s run --release -- %s", cfg.CargoPath, scenarioPath)
+	logger.Debugf("RISC0: executing command: %s run --release -- auction_scenario.json", cfg.CargoPath)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("RISC Zero execution failed: %w", err)
 	}
