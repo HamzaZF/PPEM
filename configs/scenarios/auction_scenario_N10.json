@@ -1,0 +1,108 @@
+{
+  "scenario_name": "Generated_PPEM_Auction_N10",
+  "description": "Generated PPEM auction with 10 participants (5 buyers, 5 sellers)",
+  "expected_clearing_price": 65,
+  "expected_total_energy_traded": 39,
+  "participants": [
+    {
+      "id": 0,
+      "role": 0,
+      "price": 74,
+      "quantity": 15,
+      "in_coin": 2948,
+      "in_energy": 97,
+      "out_coin": 1973,
+      "out_energy": 112
+    },
+    {
+      "id": 1,
+      "role": 0,
+      "price": 83,
+      "quantity": 10,
+      "in_coin": 2764,
+      "in_energy": 134,
+      "out_coin": 2114,
+      "out_energy": 144
+    },
+    {
+      "id": 2,
+      "role": 0,
+      "price": 68,
+      "quantity": 14,
+      "in_coin": 2642,
+      "in_energy": 144,
+      "out_coin": 1732,
+      "out_energy": 158
+    },
+    {
+      "id": 3,
+      "role": 0,
+      "price": 56,
+      "quantity": 11,
+      "in_coin": 2465,
+      "in_energy": 163,
+      "out_coin": 2465,
+      "out_energy": 163
+    },
+    {
+      "id": 4,
+      "role": 0,
+      "price": 58,
+      "quantity": 12,
+      "in_coin": 2351,
+      "in_energy": 155,
+      "out_coin": 2351,
+      "out_energy": 155
+    },
+    {
+      "id": 5,
+      "role": 1,
+      "price": 64,
+      "quantity": 5,
+      "in_coin": 2429,
+      "in_energy": 130,
+      "out_coin": 2754,
+      "out_energy": 125
+    },
+    {
+      "id": 6,
+      "role": 1,
+      "price": 60,
+      "quantity": 14,
+      "in_coin": 2960,
+      "in_energy": 175,
+      "out_coin": 3870,
+      "out_energy": 161
+    },
+    {
+      "id": 7,
+      "role": 1,
+      "price": 62,
+      "quantity": 20,
+      "in_coin": 1198,
+      "in_energy": 135,
+      "out_coin": 2498,
+      "out_energy": 115
+    },
+    {
+      "id": 8,
+      "role": 1,
+      "price": 75,
+      "quantity": 13,
+      "in_coin": 2652,
+      "in_energy": 81,
+      "out_coin": 2652,
+      "out_energy": 81
+    },
+    {
+      "id": 9,
+      "role": 1,
+      "price": 74,
+      "quantity": 8,
+      "in_coin": 2992,
+      "in_energy": 114,
+      "out_coin": 2992,
+      "out_energy": 114
+    }
+  ]
+}

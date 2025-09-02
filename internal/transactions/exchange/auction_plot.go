@@ -140,23 +140,13 @@ func prepareParticipantPlotData(inputs []DecryptedRegistration, roles map[int]ze
 
 // CreateSupplyDemandPlot creates a supply and demand curve plot
 func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType, auctionResult *AuctionExecutionResult, config *PlotConfig) error {
-	if config == nil {
-		config = DefaultPlotConfig()
-	}
-
-	// Prepare data
+	if config == nil { config = DefaultPlotConfig() }
 	buyers, sellers := prepareParticipantPlotData(inputs, roles, auctionResult)
-
-	// Create plot
 	p := plot.New()
 	p.Title.Text = config.Title
 	p.X.Label.Text = "Quantity (Energy Units)"
 	p.Y.Label.Text = "Price (Coins/Unit)"
-
-	if config.ShowGrid {
-		p.Add(plotter.NewGrid())
-	}
-
+	if config.ShowGrid { p.Add(plotter.NewGrid()) }
 	// Build demand curve (proper step function)
 	if len(buyers) > 0 {
 		demandPoints := make(plotter.XYs, 0)
@@ -331,62 +321,8 @@ func CreateSupplyDemandPlot(inputs []DecryptedRegistration, roles map[int]zeroca
 	// Save plot - try SVG first, then fallback to text
 	svgPath := config.OutputPath
 	if len(svgPath) >= 4 && svgPath[len(svgPath)-4:] == ".png" { svgPath = svgPath[:len(svgPath)-4] + ".svg" }
-
 	if err := p.Save(config.Width, config.Height, svgPath); err != nil {
-		fmt.Printf("Plot rendering completed (file save may require additional dependencies)\n")
-		fmt.Printf("   Configuration: %dx%d, Title: %s\n", int(config.Width), int(config.Height), config.Title)
 		return nil
 	}
-	fmt.Printf("Plot saved to: %s\n", svgPath)
-
 	return nil
-}
-
-// CreateAuctionAnalysisPlots creates multiple plots for comprehensive auction analysis
-func CreateAuctionAnalysisPlots(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType, auctionResult *AuctionExecutionResult, outputDir string) error {
-	// Supply and Demand plot
-	supplyDemandConfig := DefaultPlotConfig()
-	supplyDemandConfig.OutputPath = fmt.Sprintf("%s/supply_demand.png", outputDir)
-	supplyDemandConfig.Title = fmt.Sprintf("Supply & Demand | Clearing Price: %v | Traded: %d units",
-		auctionResult.ClearingPrice, auctionResult.TotalEnergyTraded)
-
-	if err := CreateSupplyDemandPlot(inputs, roles, auctionResult, supplyDemandConfig); err != nil {
-		return fmt.Errorf("failed to create supply/demand plot: %w", err)
-	}
-
-	fmt.Printf("Auction plots created:\n")
-	fmt.Printf("   Supply & Demand: %s\n", supplyDemandConfig.OutputPath)
-
-	return nil
-}
-
-// VisualizeAuctionBehavior creates a comprehensive visual analysis of auction behavior
-func VisualizeAuctionBehavior(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType, auctionResult *AuctionExecutionResult) error {
-	config := DefaultPlotConfig()
-	config.Title = fmt.Sprintf("Auction Analysis | Clearing: %v | Traded: %d",
-		auctionResult.ClearingPrice, auctionResult.TotalEnergyTraded)
-	err := CreateSupplyDemandPlot(inputs, roles, auctionResult, config)
-	if err != nil {
-		return fmt.Errorf("failed to create auction visualization: %w", err)
-	}
-	fmt.Printf("Auction visualization saved to: %s\n", config.OutputPath)
-
-	fmt.Printf("\nMarket summary:\n")
-	buyers, sellers := prepareParticipantPlotData(inputs, roles, auctionResult)
-	fmt.Printf("   Buyers: %d total (%d qualified)\n", len(buyers), countQualified(buyers))
-	fmt.Printf("   Sellers: %d total (%d qualified)\n", len(sellers), countQualified(sellers))
-	fmt.Printf("   Clearing price: %v coins/unit\n", auctionResult.ClearingPrice)
-	fmt.Printf("   Energy traded: %d units\n", auctionResult.TotalEnergyTraded)
-	return nil
-}
-
-// countQualified counts qualified participants
-func countQualified(participants []ParticipantPlotData) int {
-	count := 0
-	for _, p := range participants {
-		if p.IsQualified {
-			count++
-		}
-	}
-	return count
 }

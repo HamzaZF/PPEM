@@ -1,0 +1,18 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+methods = { path = "../methods" }
+risc0-zkvm = { version = "^2.3.1", features = ["prove"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = "1.0"
+serde_json = "1.0"
+# For c0/c1 extraction
+ark-bn254 = "0.4"
+ark-serialize = "0.4"
+hex = "0.4"
+# For journal binding validation
+sha2 = "0.10"
+bincode = "1.3"

@@ -13,6 +13,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -23,8 +25,12 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/algebra/emulated/sw_bn254"
 	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
+	"github.com/consensys/gnark/std/math/emulated"
+	recursion "github.com/consensys/gnark/std/recursion/groth16"
 
+	"implementation/internal/risc0"
 	"implementation/internal/zerocash"
 )
 
@@ -43,6 +49,7 @@ type DecryptedRegistration struct {
 	PkOut    *big.Int       // Output public key
 	SkIn     *big.Int       // Input secret key
 	Price    *big.Int       // Order price (bid for buyers, ask for sellers)
+	Role     *big.Int       // Order role (0=BUY, 1=SELL) - from DecVal[i][5]
 	Quantity *big.Int       // Order quantity (amount of energy to trade)
 	Coins    *big.Int       // Coin balance
 	Energy   *big.Int       // Energy balance
@@ -79,6 +86,7 @@ func DecryptAllRegistrations(payloads []RegistrationPayload, auctioneerSk *big.I
 			PkOut:    decrypted[0], // pk^out
 			SkIn:     decrypted[1], // sk^in
 			Price:    decrypted[2], // price (formerly bid)
+			Role:     decrypted[5], // role (0=BUY, 1=SELL)
 			Quantity: decrypted[6], // quantity
 			Coins:    decrypted[3], // coins
 			Energy:   decrypted[4], // energy
@@ -98,7 +106,9 @@ func DecryptTransactionNotes(payloads []RegistrationPayload, auctioneerECDHPrivK
 	results := make([]DecryptedRegistration, len(payloads))
 
 	for i, payload := range payloads {
-		result := DecryptedRegistration{}
+		result := DecryptedRegistration{
+			Role: big.NewInt(0), // Default to BUY
+		}
 
 		// Decrypt transaction note data if present
 		if len(payload.TxNoteData) > 0 {
@@ -176,12 +186,12 @@ func SortParticipantsForCircuit(
 		}
 	}
 
-	// Sort buyers in descending order by price (highest price first)
+	// Sort buyers in descending order by price (highest price first), tie-break by ID ascending
 	sort.Slice(buyers, func(i, j int) bool {
 		priceI := buyers[i].Input.Price
 		priceJ := buyers[j].Input.Price
 		if priceI == nil && priceJ == nil {
-			return false
+			return buyers[i].Index < buyers[j].Index // Tie-break by index/ID
 		}
 		if priceI == nil {
 			return false
@@ -189,15 +199,19 @@ func SortParticipantsForCircuit(
 		if priceJ == nil {
 			return true
 		}
-		return priceI.Cmp(priceJ) > 0 // Descending order
+		cmp := priceI.Cmp(priceJ)
+		if cmp == 0 {
+			return buyers[i].Index < buyers[j].Index // Tie-break by index/ID
+		}
+		return cmp > 0 // Descending order
 	})
 
-	// Sort sellers in ascending order by price (lowest ask first)
+	// Sort sellers in ascending order by price (lowest ask first), tie-break by ID ascending
 	sort.Slice(sellers, func(i, j int) bool {
 		priceI := sellers[i].Input.Price
 		priceJ := sellers[j].Input.Price
 		if priceI == nil && priceJ == nil {
-			return false
+			return sellers[i].Index < sellers[j].Index // Tie-break by index/ID
 		}
 		if priceI == nil {
 			return true
@@ -205,7 +219,11 @@ func SortParticipantsForCircuit(
 		if priceJ == nil {
 			return false
 		}
-		return priceI.Cmp(priceJ) < 0 // Ascending order
+		cmp := priceI.Cmp(priceJ)
+		if cmp == 0 {
+			return sellers[i].Index < sellers[j].Index // Tie-break by index/ID
+		}
+		return cmp < 0 // Ascending order
 	})
 
 	// Reconstruct the sorted arrays with real participants only
@@ -305,7 +323,11 @@ func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zeroca
 	}
 	var buyers, sellers []IndexedParticipant
 	buyerCount := 0
-	for _, role := range roles { if role == zerocash.BUY { buyerCount++ } }
+	for _, role := range roles {
+		if role == zerocash.BUY {
+			buyerCount++
+		}
+	}
 	for i := 0; i < buyerCount && i < len(inputs); i++ {
 		buyers = append(buyers, IndexedParticipant{Index: i, Data: inputs[i]})
 	}
@@ -318,11 +340,23 @@ func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zeroca
 
 	// Build set of distinct candidate prices (from buyers and sellers)
 	priceSet := map[string]*big.Int{}
-	for _, b := range buyers { if b.Data.Price != nil { priceSet[b.Data.Price.String()] = b.Data.Price } }
-	for _, s := range sellers { if s.Data.Price != nil { priceSet[s.Data.Price.String()] = s.Data.Price } }
-	if len(priceSet) == 0 { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)} }
+	for _, b := range buyers {
+		if b.Data.Price != nil {
+			priceSet[b.Data.Price.String()] = b.Data.Price
+		}
+	}
+	for _, s := range sellers {
+		if s.Data.Price != nil {
+			priceSet[s.Data.Price.String()] = s.Data.Price
+		}
+	}
+	if len(priceSet) == 0 {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
+	}
 	prices := make([]*big.Int, 0, len(priceSet))
-	for _, p := range priceSet { prices = append(prices, new(big.Int).Set(p)) }
+	for _, p := range priceSet {
+		prices = append(prices, new(big.Int).Set(p))
+	}
 	sort.Slice(prices, func(i, j int) bool { return prices[i].Cmp(prices[j]) < 0 })
 
 	// Helper to compute D(p), S(p)
@@ -350,22 +384,33 @@ func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zeroca
 			break
 		}
 	}
-	if pStar == nil { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)} }
+	if pStar == nil {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
+	}
 
 	// Qualified sets at p*
 	qualifiedBuyers := make([]IndexedParticipant, 0)
-	for _, b := range buyers { if b.Data.Price != nil && b.Data.Price.Cmp(pStar) >= 0 { qualifiedBuyers = append(qualifiedBuyers, b) } }
+	for _, b := range buyers {
+		if b.Data.Price != nil && b.Data.Price.Cmp(pStar) >= 0 {
+			qualifiedBuyers = append(qualifiedBuyers, b)
+		}
+	}
 	qualifiedSellers := make([]IndexedParticipant, 0)
-	for _, s := range sellers { if s.Data.Price != nil && s.Data.Price.Cmp(pStar) <= 0 { qualifiedSellers = append(qualifiedSellers, s) } }
+	for _, s := range sellers {
+		if s.Data.Price != nil && s.Data.Price.Cmp(pStar) <= 0 {
+			qualifiedSellers = append(qualifiedSellers, s)
+		}
+	}
 	if len(qualifiedBuyers) == 0 || len(qualifiedSellers) == 0 {
 		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
 	}
 
 	// Marginals at p*
-	sort.Slice(qualifiedBuyers, func(i, j int) bool { return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) < 0 })
-	sort.Slice(qualifiedSellers, func(i, j int) bool { return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0 })
-	bMarg := qualifiedBuyers[len(qualifiedBuyers)-1].Data.Price
-	aMarg := qualifiedSellers[len(qualifiedSellers)-1].Data.Price
+	// Match RISC Zero: sort buyers descending, sellers ascending, then take last element
+	sort.Slice(qualifiedBuyers, func(i, j int) bool { return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0 }) // Descending
+	sort.Slice(qualifiedSellers, func(i, j int) bool { return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0 }) // Ascending
+	bMarg := qualifiedBuyers[len(qualifiedBuyers)-1].Data.Price  // Lowest price among qualified buyers
+	aMarg := qualifiedSellers[len(qualifiedSellers)-1].Data.Price  // Highest price among qualified sellers
 	clearingPrice := new(big.Int).Div(new(big.Int).Add(bMarg, aMarg), big.NewInt(2))
 	if clearingPrice.Sign() == 0 {
 		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: big.NewInt(0)}
@@ -376,62 +421,116 @@ func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zeroca
 	buyerCaps := make(map[int]int64)
 	sellerCaps := make(map[int]int64)
 	for _, b := range qualifiedBuyers {
-		qty := int64(0); if b.Data.Quantity != nil { qty = b.Data.Quantity.Int64() }
-		coins := new(big.Int); if b.Data.Coins != nil { coins.Set(b.Data.Coins) } else { coins.SetInt64(0) }
+		qty := int64(0)
+		if b.Data.Quantity != nil {
+			qty = b.Data.Quantity.Int64()
+		}
+		coins := new(big.Int)
+		if b.Data.Coins != nil {
+			coins.Set(b.Data.Coins)
+		} else {
+			coins.SetInt64(0)
+		}
 		afford := new(big.Int).Div(coins, clearingPrice).Int64()
-		cap := qty; if afford < cap { cap = afford }
-		if cap < 0 { cap = 0 }
+		cap := qty
+		if afford < cap {
+			cap = afford
+		}
+		if cap < 0 {
+			cap = 0
+		}
 		buyerCaps[b.Index] = cap
 		effDemand += cap
 	}
 	for _, s := range qualifiedSellers {
-		qty := int64(0); if s.Data.Quantity != nil { qty = s.Data.Quantity.Int64() }
-		energy := int64(0); if s.Data.Energy != nil { energy = s.Data.Energy.Int64() }
-		cap := qty; if energy < cap { cap = energy }
-		if cap < 0 { cap = 0 }
+		qty := int64(0)
+		if s.Data.Quantity != nil {
+			qty = s.Data.Quantity.Int64()
+		}
+		energy := int64(0)
+		if s.Data.Energy != nil {
+			energy = s.Data.Energy.Int64()
+		}
+		cap := qty
+		if energy < cap {
+			cap = energy
+		}
+		if cap < 0 {
+			cap = 0
+		}
 		sellerCaps[s.Index] = cap
 		effSupply += cap
 	}
 	tradedTotal := effDemand
-	if effSupply < tradedTotal { tradedTotal = effSupply }
-	if tradedTotal <= 0 { return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: clearingPrice, MarginalBuyerPrice: bMarg, MarginalSellerPrice: aMarg, TotalEnergyTraded: 0, QualifiedBuyers: len(qualifiedBuyers), QualifiedSellers: len(qualifiedSellers)} }
+	if effSupply < tradedTotal {
+		tradedTotal = effSupply
+	}
+	if tradedTotal <= 0 {
+		return &AuctionExecutionResult{Outputs: outputs, ClearingPrice: clearingPrice, MarginalBuyerPrice: bMarg, MarginalSellerPrice: aMarg, TotalEnergyTraded: 0, QualifiedBuyers: len(qualifiedBuyers), QualifiedSellers: len(qualifiedSellers)}
+	}
 
 	// Allocate
 	totalCoinsTraded := int64(0)
 	if effDemand >= effSupply {
 		// Supply binding: fill sellers to cap; allocate buyers by desc price
-		for _, s := range qualifiedSellers { /* full, recorded in cap map */ _ = s }
+		for _, s := range qualifiedSellers { /* full, recorded in cap map */
+			_ = s
+		}
 		sort.SliceStable(qualifiedBuyers, func(i, j int) bool {
-			if qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) != 0 { return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0 }
+			if qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) != 0 {
+				return qualifiedBuyers[i].Data.Price.Cmp(qualifiedBuyers[j].Data.Price) > 0
+			}
 			return qualifiedBuyers[i].Index < qualifiedBuyers[j].Index
 		})
 		remaining := tradedTotal
 		for _, b := range qualifiedBuyers {
-			if remaining == 0 { break }
+			if remaining == 0 {
+				break
+			}
 			cap := buyerCaps[b.Index]
-			take := cap; if take > remaining { take = remaining }
-			if take > 0 { buyerCaps[b.Index] = take; remaining -= take }
+			take := cap
+			if take > remaining {
+				take = remaining
+			}
+			if take > 0 {
+				buyerCaps[b.Index] = take
+				remaining -= take
+			}
 		}
 	} else {
 		// Demand binding: fill buyers to cap; allocate sellers by asc price
-		for _, b := range qualifiedBuyers { /* full cap */ _ = b }
+		for _, b := range qualifiedBuyers { /* full cap */
+			_ = b
+		}
 		sort.SliceStable(qualifiedSellers, func(i, j int) bool {
-			if qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) != 0 { return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0 }
+			if qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) != 0 {
+				return qualifiedSellers[i].Data.Price.Cmp(qualifiedSellers[j].Data.Price) < 0
+			}
 			return qualifiedSellers[i].Index < qualifiedSellers[j].Index
 		})
 		remaining := tradedTotal
 		for _, s := range qualifiedSellers {
-			if remaining == 0 { break }
+			if remaining == 0 {
+				break
+			}
 			cap := sellerCaps[s.Index]
-			take := cap; if take > remaining { take = remaining }
-			if take > 0 { sellerCaps[s.Index] = take; remaining -= take }
+			take := cap
+			if take > remaining {
+				take = remaining
+			}
+			if take > 0 {
+				sellerCaps[s.Index] = take
+				remaining -= take
+			}
 		}
 	}
 
 	// Apply balances
 	for _, b := range qualifiedBuyers {
 		q := buyerCaps[b.Index]
-		if q <= 0 { continue }
+		if q <= 0 {
+			continue
+		}
 		idx := b.Index
 		cost := new(big.Int).Mul(clearingPrice, big.NewInt(q))
 		outputs[idx].Coins = new(big.Int).Sub(outputs[idx].Coins, cost)
@@ -440,7 +539,9 @@ func RunAuctionLogicUniform(inputs []DecryptedRegistration, roles map[int]zeroca
 	}
 	for _, s := range qualifiedSellers {
 		q := sellerCaps[s.Index]
-		if q <= 0 { continue }
+		if q <= 0 {
+			continue
+		}
 		idx := s.Index
 		rev := new(big.Int).Mul(clearingPrice, big.NewInt(q))
 		outputs[idx].Coins = new(big.Int).Add(outputs[idx].Coins, rev)
@@ -479,67 +580,6 @@ func (result *AuctionExecutionResult) GetTotalOutputCount() int {
 }
 
 // (createAuctioneerNote removed: commission is no longer supported)
-
-/*
-// COMMENTED OUT: Original auction logic (not correct, will be reworked later)
-// RunAuctionLogic implements the same auction logic as the circuit.
-// This matches the circuit's clearing price mechanism exactly.
-// Input must be pre-sorted by SortParticipantsForCircuit.
-// Returns a slice of DecryptedRegistration with updated coin/energy balances for qualified traders.
-func RunAuctionLogic(inputs []DecryptedRegistration) []DecryptedRegistration {
-	if len(inputs) == 0 {
-		return inputs
-	}
-
-	numParticipants := len(inputs)
-	halfN := numParticipants / 2
-
-	// Create output array (copy of inputs initially)
-	outputs := make([]DecryptedRegistration, len(inputs))
-	copy(outputs, inputs)
-
-	// Define clearing price as the price of buyer number N/4 (matches circuit logic)
-	clearingPriceIdx := halfN / 2
-	if clearingPriceIdx >= len(inputs) || inputs[clearingPriceIdx].Price == nil {
-		return outputs // No clearing price available
-	}
-	clearingPrice := new(big.Int).Set(inputs[clearingPriceIdx].Price)
-
-	// Fixed trading volume (same as circuit TRADING_VOLUME constant)
-	tradingVolume := big.NewInt(TRADING_VOLUME)
-
-	// Process trading for all participants (matches circuit logic)
-	for i := 0; i < numParticipants; i++ {
-		if i < halfN {
-			// This is a buyer (index 0 to N/2-1)
-			// Buyer qualifies if their bid >= clearing price
-			qualified := inputs[i].Price != nil && inputs[i].Price.Cmp(clearingPrice) >= 0
-			if qualified {
-				// Calculate trading cost
-				tradingCost := new(big.Int).Mul(clearingPrice, tradingVolume)
-
-				// Apply trading: buyer loses coins, gains energy (assign new values)
-				outputs[i].Coins = new(big.Int).Sub(inputs[i].Coins, tradingCost)
-				outputs[i].Energy = new(big.Int).Add(inputs[i].Energy, tradingVolume)
-			}
-		} else {
-			// This is a seller (index N/2 to N-1)
-			// Seller qualifies if their ask <= clearing price
-			qualified := inputs[i].Price != nil && inputs[i].Price.Cmp(clearingPrice) <= 0
-			if qualified {
-				// Calculate trading revenue
-				tradingRevenue := new(big.Int).Mul(clearingPrice, tradingVolume)
-
-				// Apply trading: seller gains coins, loses energy (assign new values)
-				outputs[i].Coins = new(big.Int).Add(inputs[i].Coins, tradingRevenue)
-				outputs[i].Energy = new(big.Int).Sub(inputs[i].Energy, tradingVolume)
-			}
-		}
-	}
-
-	return outputs
-}
-*/
 
 // ExchangeTransaction represents the transaction output of the exchange phase.
 // Contains all inputs, outputs, and proof data for the auction.
@@ -629,7 +669,7 @@ func validateExchangeInputs(
 
 // BuildWitnessFN builds a witness for the dynamic CircuitTxFN.
 // Populates all circuit fields for N participants using the provided auction results.
-func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *sw_bls12377.G1Affine, auctionExecution *AuctionExecutionResult, roles map[int]zerocash.OrderType) *CircuitTxFN {
+func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []RegistrationPayload, auctioneerSk *big.Int, participantDHKeys []*bls12377_fr.Element, auctioneerDHPk *sw_bls12377.G1Affine, auctionExecution *AuctionExecutionResult, roles map[int]zerocash.OrderType, risc0ProofData *risc0.RISC0ProofData, receiptData *risc0.ReceiptData) *CircuitTxFN {
 	n := len(payloads)
 	if n == 0 {
 		return nil
@@ -760,6 +800,12 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 	sk.SetBigInt(auctioneerSk)
 
 	// For each of the N participants, populate the witness arrays
+	// Also collect the exact values we assign, so we can build RISC0PublicInputs
+	inCoinVals := make([]*big.Int, n)
+	inEnergyVals := make([]*big.Int, n)
+	outCoinVals := make([]*big.Int, n)
+	outEnergyVals := make([]*big.Int, n)
+
 	for i := 0; i < n; i++ {
 		var in DecryptedRegistration
 		var payload RegistrationPayload
@@ -796,6 +842,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		// Get consistent values for this participant
 		coins := getSafeValue(in, "coins")
 		energy := getSafeValue(in, "energy")
+		inCoinVals[i] = new(big.Int).Set(coins)
+		inEnergyVals[i] = new(big.Int).Set(energy)
 		skIn := getSafeValue(in, "skin")
 		bid := getSafeValue(in, "bid")
 
@@ -833,6 +881,8 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		}
 		outCoins := getSafeValue(out, "coins")
 		outEnergy := getSafeValue(out, "energy")
+		outCoinVals[i] = new(big.Int).Set(outCoins)
+		outEnergyVals[i] = new(big.Int).Set(outEnergy)
 		// Recompute output pk, rho, rand, sn, cm for consistency
 		outSkIn := getSafeValue(out, "skin")
 		outBid := getSafeValue(out, "bid")
@@ -933,19 +983,131 @@ func BuildWitnessFN(inputs, outputs []DecryptedRegistration, payloads []Registra
 		}
 	}
 
+	// Note: RISC Zero input data consistency will be verified when RISC Zero verification is enabled
+	// The circuit now uses consistent data sources - DecryptedRegistration.Role matches RISC Zero input
+
+	// Provide private clearing price input for the circuit from host-side auction execution
+	if auctionExecution != nil && auctionExecution.ClearingPrice != nil {
+		fmt.Printf("\n=== DEBUG: BEFORE PASSING TO CIRCUIT ===\n")
+		fmt.Printf("ClearingPrice: %s\n", auctionExecution.ClearingPrice.String())
+		circuit.ClearingPrice = auctionExecution.ClearingPrice.String()
+	} else {
+		fmt.Printf("\n=== DEBUG: BEFORE PASSING TO CIRCUIT ===\n")
+		fmt.Printf("ClearingPrice: 0 (no auction execution)\n")
+		circuit.ClearingPrice = "0"
+	}
+	
+	// DEBUG: Print all the values we're setting
+	fmt.Printf("InCoin values: ")
+	for i := 0; i < n; i++ {
+		fmt.Printf("%v ", circuit.InCoin[i])
+	}
+	fmt.Printf("\nInEnergy values: ")
+	for i := 0; i < n; i++ {
+		fmt.Printf("%v ", circuit.InEnergy[i])
+	}
+	fmt.Printf("\nOutCoin values: ")
+	for i := 0; i < n; i++ {
+		fmt.Printf("%v ", circuit.OutCoin[i])
+	}
+	fmt.Printf("\nOutEnergy values: ")
+	for i := 0; i < n; i++ {
+		fmt.Printf("%v ", circuit.OutEnergy[i])
+	}
+	fmt.Printf("\n=== END DEBUG ===\n\n")
+
+	// Populate RISC Zero receipt data for claim digest computation
+	if receiptData != nil {
+		circuit.PrePC = toVar(big.NewInt(int64(receiptData.PrePC)))
+		circuit.PostPC = toVar(big.NewInt(int64(receiptData.PostPC)))
+		circuit.SysExit = toVar(big.NewInt(int64(receiptData.SysExit)))
+		circuit.UserExit = toVar(big.NewInt(int64(receiptData.UserExit)))
+		
+		// Convert merkle root bytes to frontend.Variable array
+		for i := 0; i < 32; i++ {
+			circuit.PreMerkleRoot[i] = toVar(big.NewInt(int64(receiptData.PreMerkleRoot[i])))
+			circuit.PostMerkleRoot[i] = toVar(big.NewInt(int64(receiptData.PostMerkleRoot[i])))
+		}
+	} else {
+		// Use default values if no receipt data provided
+		defaultReceipt := risc0.GetDefaultReceiptData()
+		circuit.PrePC = "0"
+		circuit.PostPC = "0"
+		circuit.SysExit = "0"
+		circuit.UserExit = "0"
+		
+		for i := 0; i < 32; i++ {
+			circuit.PreMerkleRoot[i] = toVar(big.NewInt(int64(defaultReceipt.PreMerkleRoot[i])))
+			circuit.PostMerkleRoot[i] = toVar(big.NewInt(int64(defaultReceipt.PostMerkleRoot[i])))
+		}
+	}
+
+	// Populate RISC0 public inputs with values consistent with the circuit witness
+	{
+		// Layout: [0] clearing_price, then 4 blocks of N values (in_coin, in_energy, out_coin, out_energy)
+		pub := make([]emulated.Element[sw_bn254.ScalarField], 1+4*n)
+		cp := big.NewInt(0)
+		if auctionExecution != nil && auctionExecution.ClearingPrice != nil {
+			cp = auctionExecution.ClearingPrice
+		}
+		pub[0] = emulated.ValueOf[sw_bn254.ScalarField](cp)
+		idx := 1
+		for i := 0; i < n; i++ {
+			pub[idx+i] = emulated.ValueOf[sw_bn254.ScalarField](inCoinVals[i])
+		}
+		idx += n
+		for i := 0; i < n; i++ {
+			pub[idx+i] = emulated.ValueOf[sw_bn254.ScalarField](inEnergyVals[i])
+		}
+		idx += n
+		for i := 0; i < n; i++ {
+			pub[idx+i] = emulated.ValueOf[sw_bn254.ScalarField](outCoinVals[i])
+		}
+		idx += n
+		for i := 0; i < n; i++ {
+			pub[idx+i] = emulated.ValueOf[sw_bn254.ScalarField](outEnergyVals[i])
+		}
+		//circuit.RISC0PublicInputs = recursion.Witness[sw_bn254.ScalarField]{Public: pub}
+		circuit.RISC0PublicInputs = risc0ProofData.PublicInputs
+	}
+
+	// Populate RISC Zero proof metadata if available (does not affect public inputs here)
+	if risc0ProofData != nil {
+		circuit.RISC0Proof = risc0ProofData.Proof
+		circuit.RISC0VerifyingKey = risc0ProofData.VerifyingKey
+	} else {
+		// If no proof data provided, try to load verification key from file
+		workingDir, _ := os.Getwd()
+		vkeyPath := filepath.Join(workingDir, "circom", "circom_data", "vkey.json")
+		if _, err := os.Stat(vkeyPath); os.IsNotExist(err) {
+			vkeyPath = filepath.Join(workingDir, "circom", "vkey.json")
+		}
+		if err := circuit.loadRISC0VerificationKey(vkeyPath); err != nil {
+			// Use zero verification key as fallback
+			circuit.RISC0VerifyingKey = recursion.VerifyingKey[sw_bn254.G1Affine, sw_bn254.G2Affine, sw_bn254.GTEl]{}
+		}
+	}
+
 	return circuit
 }
 
 // GenerateProofFN generates a proof using the dynamic CircuitTxFN.
 // Returns the proof as a byte slice.
 func GenerateProofFN(witness *CircuitTxFN, pk groth16.ProvingKey, ccs constraint.ConstraintSystem) ([]byte, error) {
+	// DEBUG: Print witness values right before creating witness
+	fmt.Printf("\n=== WITNESS VALUES BEFORE CREATION ===\n")
+	fmt.Printf("witness.ClearingPrice: %v\n", witness.ClearingPrice)
+	fmt.Printf("witness.InCoin[0-2]: %v %v %v\n", witness.InCoin[0], witness.InCoin[1], witness.InCoin[2])
+	fmt.Printf("witness.InEnergy[0-2]: %v %v %v\n", witness.InEnergy[0], witness.InEnergy[1], witness.InEnergy[2])
+	fmt.Printf("======================================\n\n")
+	
 	// Create witness
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		return nil, fmt.Errorf("witness creation failed: %w", err)
 	}
 
-	// Generate proof
+	fmt.Printf("\x1b[35m▪ Exchange Circuit (106580 constraints)\x1b[0m\n")
 	proof, err := groth16.Prove(ccs, pk, w)
 	if err != nil {
 		return nil, fmt.Errorf("proof generation failed: %w", err)
@@ -959,6 +1121,111 @@ func GenerateProofFN(witness *CircuitTxFN, pk groth16.ProvingKey, ccs constraint
 	}
 
 	return proofBuf.Bytes(), nil
+}
+
+// RunAuctionLogicWithRISC0 runs the auction logic using RISC Zero and generates a ZK proof
+func RunAuctionLogicWithRISC0(inputs []DecryptedRegistration, roles map[int]zerocash.OrderType) (*AuctionExecutionResult, *risc0.RISC0ProofData, error) {
+	// First run the auction logic normally to get initial results
+	// BUT we will override with RISC Zero's actual results later
+	auctionResult := RunAuctionLogicUniform(inputs, roles)
+	
+	// // TEMPORARY FIX: Load the expected results from gnark_inputs.json
+	// // This ensures we use RISC Zero's computed values, not Go's
+	// gnarkInputsPath := "risc0/gnark_inputs.json"
+	// if data, err := os.ReadFile(gnarkInputsPath); err == nil {
+	// 	var gnarkInputs struct {
+	// 		ClearingPrice uint64   `json:"clearing_price"`
+	// 		OutCoin       []uint64 `json:"out_coin"`
+	// 		OutEnergy     []uint64 `json:"out_energy"`
+	// 	}
+	// 	if err := json.Unmarshal(data, &gnarkInputs); err == nil {
+	// 		fmt.Printf("\n=== OVERRIDE WITH RISC ZERO RESULTS ===\n")
+	// 		fmt.Printf("Using RISC Zero clearing price: %d (was %v)\n", gnarkInputs.ClearingPrice, auctionResult.ClearingPrice)
+	// 		
+	// 		// Override clearing price
+	// 		auctionResult.ClearingPrice = big.NewInt(int64(gnarkInputs.ClearingPrice))
+	// 		
+	// 		// Override output values
+	// 		for i := range auctionResult.Outputs {
+	// 			if i < len(gnarkInputs.OutCoin) {
+	// 				auctionResult.Outputs[i].Coins = big.NewInt(int64(gnarkInputs.OutCoin[i]))
+	// 			}
+	// 			if i < len(gnarkInputs.OutEnergy) {
+	// 				auctionResult.Outputs[i].Energy = big.NewInt(int64(gnarkInputs.OutEnergy[i]))
+	// 			}
+	// 		}
+	// 		fmt.Printf("========================================\n\n")
+	// 	} else {
+	// 		fmt.Printf("WARNING: Failed to parse gnark_inputs.json: %v\n", err)
+	// 	}
+	// } else {
+	// 	fmt.Printf("WARNING: Failed to read gnark_inputs.json: %v\n", err)
+	// }
+
+	// Convert inputs to RISC Zero format
+	risc0Participants := make([]risc0.Participant, len(inputs))
+	for i, input := range inputs {
+		// Use role from decrypted registration data (source of truth)
+		role := uint32(0) // BUY (default)
+		if input.Role != nil {
+			role = uint32(input.Role.Uint64()) // Use decrypted role
+		}
+
+		// Get safe values with defaults
+		price := uint64(0)
+		if input.Price != nil {
+			price = input.Price.Uint64()
+		}
+		quantity := uint64(10) // default
+		if input.Quantity != nil {
+			quantity = input.Quantity.Uint64()
+		}
+		inCoin := uint64(0)
+		if input.Coins != nil {
+			inCoin = input.Coins.Uint64()
+		}
+		inEnergy := uint64(0)
+		if input.Energy != nil {
+			inEnergy = input.Energy.Uint64()
+		}
+
+		// Get output values from auction result
+		outCoin := inCoin
+		outEnergy := inEnergy
+		if i < len(auctionResult.Outputs) {
+			if auctionResult.Outputs[i].Coins != nil {
+				outCoin = auctionResult.Outputs[i].Coins.Uint64()
+			}
+			if auctionResult.Outputs[i].Energy != nil {
+				outEnergy = auctionResult.Outputs[i].Energy.Uint64()
+			}
+		}
+
+		risc0Participants[i] = risc0.Participant{
+			ID:        uint32(i),
+			Role:      role,
+			Price:     price,
+			Quantity:  quantity,
+			InCoin:    inCoin,
+			InEnergy:  inEnergy,
+			OutCoin:   outCoin,
+			OutEnergy: outEnergy,
+		}
+	}
+
+	// Generate RISC Zero proof
+	clearingPrice := big.NewInt(0)
+	if auctionResult.ClearingPrice != nil {
+		clearingPrice = auctionResult.ClearingPrice
+	}
+	totalEnergyTraded := auctionResult.TotalEnergyTraded
+
+	proofData, err := risc0.GenerateRISC0Proof(risc0Participants, clearingPrice, totalEnergyTraded)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate RISC Zero proof: %w", err)
+	}
+
+	return auctionResult, proofData, nil
 }
 
 // ExchangePhaseWithNotes is the main entry point for the exchange phase with note decryption.
@@ -976,28 +1243,28 @@ func ExchangePhaseWithNotes(
 	params *zerocash.Params,
 	pk groth16.ProvingKey,
 	ccs constraint.ConstraintSystem,
-) (txOut interface{}, info interface{}, proof []byte, err error) {
+) (txOut interface{}, info interface{}, proof []byte, risc0Data *risc0.RISC0ProofData, publicInputs interface{}, err error) {
 	// Input validation
 	if err := validateExchangeInputs(regPayloads, auctioneerSk, ledger, params, pk, ccs); err != nil {
-		return nil, nil, nil, fmt.Errorf("input validation failed: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("input validation failed: %w", err)
 	}
 	if auctioneerECDHPrivKey == nil {
-		return nil, nil, nil, fmt.Errorf("auctioneer ECDH private key is required")
+		return nil, nil, nil, nil, nil, fmt.Errorf("auctioneer ECDH private key is required")
 	}
 	if len(participantECDHPubKeys) != len(regPayloads) {
-		return nil, nil, nil, fmt.Errorf("participant ECDH public keys count mismatch: expected %d, got %d", len(regPayloads), len(participantECDHPubKeys))
+		return nil, nil, nil, nil, nil, fmt.Errorf("participant ECDH public keys count mismatch: expected %d, got %d", len(regPayloads), len(participantECDHPubKeys))
 	}
 
 	// 1. Decrypt registration data (from Algorithm 2 - DH+OTP encryption)
 	regInputs, err := DecryptAllRegistrations(regPayloads, auctioneerSk)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to decrypt registration data: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to decrypt registration data: %w", err)
 	}
 
 	// 2. Decrypt transaction note data (from Algorithm 1 - ECDH+AES encryption)
 	noteInputs, err := DecryptTransactionNotes(regPayloads, auctioneerECDHPrivKey, participantECDHPubKeys)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to decrypt transaction notes: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to decrypt transaction notes: %w", err)
 	}
 
 	// 3. Merge the decrypted data
@@ -1007,6 +1274,7 @@ func ExchangePhaseWithNotes(
 			PkOut:    regInputs[i].PkOut,
 			SkIn:     regInputs[i].SkIn,
 			Price:    regInputs[i].Price,
+			Role:     regInputs[i].Role, // Include role from decrypted data
 			Coins:    regInputs[i].Coins,
 			Energy:   regInputs[i].Energy,
 			NoteData: noteInputs[i].NoteData, // Use the NoteData field from DecryptedRegistration
@@ -1023,18 +1291,47 @@ func ExchangePhaseWithNotes(
 	// Buyers first (descending by bid), then sellers (ascending by bid) based on actual roles
 	sortedInputs, sortedPayloads, sortedDHKeys, err := SortParticipantsForCircuit(inputs, regPayloads, participantDHKeys, roles)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to sort participants for circuit: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to sort participants for circuit: %w", err)
 	}
 
-	// 5. Run auction logic (uniform, no commission)
-	auctionExecution := RunAuctionLogicUniform(sortedInputs, roles)
+	// 5. Run auction logic using RISC Zero with ZK proof
+	auctionExecution, risc0ProofData, err := RunAuctionLogicWithRISC0(sortedInputs, roles)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to run auction with RISC Zero: %w", err)
+	}
+	
+	// DEBUG: Print auction result
+	fmt.Printf("\n=== AUCTION RESULT ===\n")
+	fmt.Printf("Clearing Price from auction: %v\n", auctionExecution.ClearingPrice)
+	fmt.Printf("Number of outputs: %d\n", len(auctionExecution.Outputs))
+	fmt.Printf("==================\n\n")
+	
 	outputs := auctionExecution.Outputs
+
+	// 5.5 Read RISC Zero receipt data for claim digest computation
+	var receiptData *risc0.ReceiptData
+	workingDir, _ := os.Getwd()
+	receiptPath := filepath.Join(workingDir, "risc0", "risc0_receipt.json")
+	if _, err := os.Stat(receiptPath); err == nil {
+		// Receipt file exists, parse it
+		receiptData, err = risc0.ParseReceiptFile(receiptPath)
+		if err != nil {
+			// Log warning but continue with default values
+			fmt.Printf("Warning: Failed to parse RISC Zero receipt: %v\n", err)
+			receiptData = risc0.GetDefaultReceiptData()
+		}
+	} else {
+		// No receipt file, use default values
+		receiptData = risc0.GetDefaultReceiptData()
+	}
 
 	// 6. Build witness using the dynamic circuit approach with sorted data
 	swAuctioneerDHPk := &sw_bls12377.G1Affine{X: auctioneerDHPk.X.String(), Y: auctioneerDHPk.Y.String()}
-	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk, auctionExecution, roles)
+	witness := BuildWitnessFN(sortedInputs, outputs, sortedPayloads, auctioneerSk, sortedDHKeys, swAuctioneerDHPk, auctionExecution, roles, risc0ProofData, receiptData)
 	proof, err = GenerateProofFN(witness, pk, ccs)
-	if err != nil { return nil, nil, nil, err }
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 
 	// 7. Create structured output
 	timestamp := time.Now().Unix()
@@ -1043,15 +1340,23 @@ func ExchangePhaseWithNotes(
 	highestBid := big.NewInt(0)
 	winnerID := ""
 	for i, input := range inputs {
-		if input.Coins != nil { totalCoins.Add(totalCoins, input.Coins) }
-		if input.Energy != nil { totalEnergy.Add(totalEnergy, input.Energy) }
+		if input.Coins != nil {
+			totalCoins.Add(totalCoins, input.Coins)
+		}
+		if input.Energy != nil {
+			totalEnergy.Add(totalEnergy, input.Energy)
+		}
 		if input.Price != nil && input.Price.Cmp(highestBid) > 0 {
-			highestBid.Set(input.Price); winnerID = fmt.Sprintf("Participant%d", i+1)
+			highestBid.Set(input.Price)
+			winnerID = fmt.Sprintf("Participant%d", i+1)
 		}
 	}
 	proofHash := fmt.Sprintf("%x", sha256.Sum256(proof))
-	auctionResult := &AuctionResult{ WinnerID: winnerID, WinningBid: highestBid, TotalBids: len(inputs), TotalCoins: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofHash: proofHash }
-	exchangeTx := &ExchangeTransaction{ Participants: len(inputs), Inputs: inputs, Outputs: outputs, TotalValue: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofData: proof }
-	compositeResult := struct { AuctionResult *AuctionResult; AuctionExecution *AuctionExecutionResult }{ AuctionResult: auctionResult, AuctionExecution: auctionExecution }
-	return exchangeTx, compositeResult, proof, nil
+	auctionResult := &AuctionResult{WinnerID: winnerID, WinningBid: highestBid, TotalBids: len(inputs), TotalCoins: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofHash: proofHash}
+	exchangeTx := &ExchangeTransaction{Participants: len(inputs), Inputs: inputs, Outputs: outputs, TotalValue: totalCoins, TotalEnergy: totalEnergy, Timestamp: timestamp, ProofData: proof}
+	compositeResult := struct {
+		AuctionResult    *AuctionResult
+		AuctionExecution *AuctionExecutionResult
+	}{AuctionResult: auctionResult, AuctionExecution: auctionExecution}
+	return exchangeTx, compositeResult, proof, risc0ProofData, witness, nil
 }

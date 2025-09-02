@@ -9,16 +9,21 @@
 package zerocash
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"time"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
 )
 
 // ProtocolPhase represents the current phase of the protocol
@@ -136,6 +141,11 @@ func (l *Ledger) SetCircuitKeys(keys *CircuitKeys) {
 	l.keys = keys
 }
 
+// GetCircuitKeys returns the current circuit keys (for updating)
+func (l *Ledger) GetCircuitKeys() *CircuitKeys {
+	return l.keys
+}
+
 // SetAuctioneerKeys sets the auctioneer's public keys for decryption
 func (l *Ledger) SetAuctioneerKeys(dhPub *bls12377.G1Affine, ecdhPub *ecdh.PublicKey) {
 	l.AuctioneerDHPub = dhPub
@@ -156,7 +166,7 @@ func (l *Ledger) StartRegistrationPhase() error {
 }
 
 // SubmitRegistration submits a registration transaction (Algorithm 2)
-func (l *Ledger) SubmitRegistration(txIn *Tx, cipherAux []byte, proofReg []byte, participantID string) error {
+func (l *Ledger) SubmitRegistration(txIn *Tx, pub RegistrationPublicInputs, proofReg []byte, participantID string) error {
 	if l.CurrentPhase != PhaseRegistration {
 		return fmt.Errorf("not in registration phase, current phase: %s", l.CurrentPhase)
 	}
@@ -164,6 +174,27 @@ func (l *Ledger) SubmitRegistration(txIn *Tx, cipherAux []byte, proofReg []byte,
 	// Check that sn^base is not already spent
 	if l.HasSerialNumber(txIn.SnOld) {
 		return errors.New("double-spend detected: serial number already in ledger")
+	}
+
+	// CRITICAL: Verify BOTH the underlying Algorithm 1 transaction AND the registration proof
+
+	// 1. Verify the underlying Algorithm 1 transaction proof
+	if l.keys != nil && l.keys.VkTx != nil {
+		params := &Params{} // Empty params struct (currently unused)
+		if err := VerifyTx(txIn, params, l.keys.VkTx); err != nil {
+			return fmt.Errorf("underlying transaction proof verification failed for participant %s: %w", participantID, err)
+		}
+	} else {
+		return fmt.Errorf("cannot verify underlying transaction proof: no verification keys available")
+	}
+
+	// 2. Verify the registration proof before accepting the transaction
+	if l.keys != nil && l.keys.VkReg != nil {
+		if err := VerifyRegistrationProof(pub, proofReg, l.keys.VkReg); err != nil {
+			return fmt.Errorf("registration proof verification failed for participant %s: %w", participantID, err)
+		}
+	} else {
+		return fmt.Errorf("cannot verify registration proof: no verification keys available")
 	}
 
 	// Add to permanent SnList (sn^base)
@@ -181,15 +212,6 @@ func (l *Ledger) SubmitRegistration(txIn *Tx, cipherAux []byte, proofReg []byte,
 		Timestamp:   time.Now(),
 	})
 
-	if len(cipherAux) > 0 {
-		l.AuxList = append(l.AuxList, AuxiliaryInfo{
-			Type:        "encrypted_bid",
-			Data:        cipherAux,
-			Participant: participantID,
-			Timestamp:   time.Now(),
-		})
-	}
-
 	return nil
 }
 
@@ -204,17 +226,37 @@ func (l *Ledger) StartExchangePhase() error {
 	return nil
 }
 
-// SubmitExchange submits an exchange transaction (Algorithm 3)
-func (l *Ledger) SubmitExchange(txsOut []*Tx, proofF []byte, auctionInfo []byte) error {
+// SubmitExchange submits an exchange transaction (Algorithm 3) with proof verification
+func (l *Ledger) SubmitExchange(txsOut []*Tx, proofF []byte, auctionInfo []byte, publicInputs interface{}) error {
 	if l.CurrentPhase != PhaseExchange {
 		return fmt.Errorf("not in exchange phase, current phase: %s", l.CurrentPhase)
 	}
 
+	fmt.Printf("\x1b[32m▪ Exchange Proof Verification\x1b[0m\n")
+	if l.keys != nil && l.keys.VkExchange != nil {
+		err := VerifyExchangeProofWithInputs(proofF, l.keys.VkExchange, publicInputs)
+		if err != nil {
+			return fmt.Errorf("exchange proof verification failed: %w", err)
+		}
+	} else {
+		return fmt.Errorf("cannot verify exchange proof: no verification keys available")
+	}
+
 	// Process each output transaction
-	for _, txOut := range txsOut {
+	for i, txOut := range txsOut {
 		// Check that sn^in is not already spent
 		if l.HasSerialNumberTemp(txOut.SnOld) {
 			return errors.New("double-spend detected: serial number already in temporary ledger")
+		}
+
+		// TX verification handled by caller labeling
+		if l.keys != nil && l.keys.VkTx != nil {
+			params := &Params{} // Empty params struct (currently unused)
+			if err := VerifyTx(txOut, params, l.keys.VkTx); err != nil {
+				return fmt.Errorf("underlying transaction proof verification failed for output transaction %d: %w", i, err)
+			}
+		} else {
+			return fmt.Errorf("cannot verify underlying transaction proof for output transaction %d: no verification keys available", i)
 		}
 
 		// Add to temporary SnList (sn^in)
@@ -266,27 +308,91 @@ func (l *Ledger) CloseAuction() error {
 	return nil
 }
 
-// SubmitWithdraw submits a withdrawal transaction (Algorithm 4)
-func (l *Ledger) SubmitWithdraw(txData map[string]interface{}, proofBytes []byte) error {
+// SubmitWithdraw submits a withdrawal transaction (Algorithm 4) with proof verification
+func (l *Ledger) SubmitWithdraw(withdrawTx interface{}, proofBytes []byte, participantID string) error {
 	if l.CurrentPhase != PhaseWithdraw {
 		return fmt.Errorf("not in withdraw phase, current phase: %s", l.CurrentPhase)
 	}
 
-	// Convert to regular transaction for ledger storage
-	regularTx := &Tx{
-		SnOld:     fmt.Sprintf("%v", txData["sn_in"]),
-		CmNew:     fmt.Sprintf("%v", txData["cm_out"]),
-		OldCoin:   fmt.Sprintf("%v", txData["old_coin"]),
-		OldEnergy: fmt.Sprintf("%v", txData["old_energy"]),
-		NewCoin:   fmt.Sprintf("%v", txData["new_coin"]),
-		NewEnergy: fmt.Sprintf("%v", txData["new_energy"]),
-		Proof:     proofBytes,
+	// Verify the withdrawal proof before accepting the transaction
+	if l.keys != nil && l.keys.VkWithdraw != nil {
+		// Import withdraw package for verification
+		// We need to convert the withdrawTx to the proper type and verify
+		if err := l.verifyWithdrawalProof(withdrawTx, proofBytes); err != nil {
+			return fmt.Errorf("withdrawal proof verification failed for participant %s: %w", participantID, err)
+		}
+	} else {
+		return fmt.Errorf("cannot verify withdrawal proof: no verification keys available")
+	}
+
+	// Convert withdrawal transaction to regular transaction for ledger storage
+	var regularTx *Tx
+	if txData, ok := withdrawTx.(map[string]interface{}); ok {
+		regularTx = &Tx{
+			SnOld:     fmt.Sprintf("%v", txData["sn_in"]),
+			CmNew:     fmt.Sprintf("%v", txData["cm_out"]),
+			OldCoin:   fmt.Sprintf("%v", txData["old_coin"]),
+			OldEnergy: fmt.Sprintf("%v", txData["old_energy"]),
+			NewCoin:   fmt.Sprintf("%v", txData["new_coin"]),
+			NewEnergy: fmt.Sprintf("%v", txData["new_energy"]),
+			Proof:     proofBytes,
+		}
+	} else {
+		return fmt.Errorf("invalid withdrawal transaction format")
+	}
+
+	// If the underlying Alg.1 tx was already submitted, don't fail on duplicate SN
+	// Otherwise, record it now.
+	if !l.HasSerialNumber(regularTx.SnOld) {
+		l.SnList = append(l.SnList, regularTx.SnOld)
+		l.CmList = append(l.CmList, regularTx.CmNew)
+		l.TxList = append(l.TxList, regularTx)
+	}
+
+	// Add auxiliary information (withdraw proof)
+	l.AuxList = append(l.AuxList, AuxiliaryInfo{
+		Type:        "withdraw_proof",
+		Data:        proofBytes,
+		Participant: participantID,
+		Timestamp:   time.Now(),
+	})
+
+	return nil
+}
+
+// SubmitTransaction submits a regular transaction (Algorithm 1) with proof verification
+func (l *Ledger) SubmitTransaction(tx *Tx, params *Params, participantID string) error {
+	// Check current phase - transactions can be submitted in multiple phases
+	if l.CurrentPhase == PhaseSetup {
+		return fmt.Errorf("cannot submit transaction in setup phase")
+	}
+
+	// Check that sn^old is not already spent
+	if l.HasSerialNumber(tx.SnOld) {
+		return errors.New("double-spend detected: serial number already in ledger")
+	}
+
+	// Verify the transaction proof before accepting the transaction
+	if l.keys != nil && l.keys.VkTx != nil {
+		if err := VerifyTx(tx, params, l.keys.VkTx); err != nil {
+			return fmt.Errorf("transaction proof verification failed for participant %s: %w", participantID, err)
+		}
+	} else {
+		return fmt.Errorf("cannot verify transaction proof: no verification keys available")
 	}
 
 	// Add to permanent lists
-	l.SnList = append(l.SnList, regularTx.SnOld)
-	l.CmList = append(l.CmList, regularTx.CmNew)
-	l.TxList = append(l.TxList, regularTx)
+	l.SnList = append(l.SnList, tx.SnOld)
+	l.CmList = append(l.CmList, tx.CmNew)
+	l.TxList = append(l.TxList, tx)
+
+	// Add auxiliary information
+	l.AuxList = append(l.AuxList, AuxiliaryInfo{
+		Type:        "transaction_proof",
+		Data:        tx.Proof,
+		Participant: participantID,
+		Timestamp:   time.Now(),
+	})
 
 	return nil
 }
@@ -378,6 +484,105 @@ func LoadLedgerFromFile(path string) (*Ledger, error) {
 
 // Private helper functions
 
+// verifyWithdrawalProof verifies a withdrawal proof using the withdrawal verification key
+func (l *Ledger) verifyWithdrawalProof(withdrawTx interface{}, proofBytes []byte) error {
+	if len(proofBytes) == 0 {
+		return fmt.Errorf("empty withdrawal proof")
+	}
+
+	// Convert the withdrawal transaction to our verification format
+	var verificationTx *WithdrawTxForVerification
+
+	if txData, ok := withdrawTx.(map[string]interface{}); ok {
+		// Parse values from the transaction data
+		snIn := new(big.Int)
+		cmOut := new(big.Int)
+
+		// sn_in
+		if snInRaw, ok := txData["sn_in"]; ok {
+			snInStr := fmt.Sprintf("%v", snInRaw)
+			if _, ok := snIn.SetString(snInStr, 10); !ok {
+				return fmt.Errorf("invalid sn_in value: %v", snInRaw)
+			}
+		} else {
+			return fmt.Errorf("missing sn_in in withdrawal transaction")
+		}
+
+		// cm_out
+		if cmOutRaw, ok := txData["cm_out"]; ok {
+			cmOutStr := fmt.Sprintf("%v", cmOutRaw)
+			if _, ok := cmOut.SetString(cmOutStr, 10); !ok {
+				return fmt.Errorf("invalid cm_out value: %v", cmOutRaw)
+			}
+		} else {
+			return fmt.Errorf("missing cm_out in withdrawal transaction")
+		}
+
+		// pk_t
+		var pkT sw_bls12377.G1Affine
+		if pkTRaw, ok := txData["pk_t"]; ok {
+			switch v := pkTRaw.(type) {
+			case map[string]interface{}:
+				xStr := fmt.Sprintf("%v", v["x"])
+				yStr := fmt.Sprintf("%v", v["y"])
+				pkT = sw_bls12377.G1Affine{X: xStr, Y: yStr}
+			case map[string]string:
+				pkT = sw_bls12377.G1Affine{X: v["x"], Y: v["y"]}
+			default:
+				return fmt.Errorf("invalid pk_t format")
+			}
+		} else {
+			return fmt.Errorf("missing pk_t in withdrawal transaction")
+		}
+
+		// cipher_aux (array of 5)
+		var cipherAux [5]*big.Int
+		if caRaw, ok := txData["cipher_aux"]; ok {
+			switch arr := caRaw.(type) {
+			case []interface{}:
+				if len(arr) != 5 {
+					return fmt.Errorf("cipher_aux must be array of 5 values")
+				}
+				for i := 0; i < 5; i++ {
+					bi := new(big.Int)
+					vStr := fmt.Sprintf("%v", arr[i])
+					if _, ok := bi.SetString(vStr, 10); !ok {
+						return fmt.Errorf("invalid cipher_aux[%d] value: %v", i, arr[i])
+					}
+					cipherAux[i] = bi
+				}
+			case []string:
+				if len(arr) != 5 {
+					return fmt.Errorf("cipher_aux must be array of 5 values")
+				}
+				for i := 0; i < 5; i++ {
+					bi := new(big.Int)
+					if _, ok := bi.SetString(arr[i], 10); !ok {
+						return fmt.Errorf("invalid cipher_aux[%d] value: %v", i, arr[i])
+					}
+					cipherAux[i] = bi
+				}
+			default:
+				return fmt.Errorf("invalid cipher_aux format")
+			}
+		} else {
+			return fmt.Errorf("missing cipher_aux in withdrawal transaction")
+		}
+
+		verificationTx = &WithdrawTxForVerification{
+			SnIn:      snIn,
+			CmOut:     cmOut,
+			PkT:       pkT,
+			CipherAux: cipherAux,
+		}
+	} else {
+		return fmt.Errorf("unsupported withdrawal transaction format")
+	}
+
+	// Use the proper verification function
+	return VerifyWithdrawalProofInLedger(verificationTx, proofBytes, l.keys.VkWithdraw)
+}
+
 func (l *Ledger) getParticipantIDs() []string {
 	participantMap := make(map[string]bool)
 	for _, aux := range l.AuxList {
@@ -394,8 +599,72 @@ func (l *Ledger) getParticipantIDs() []string {
 	return participants
 }
 
+// generateAuctionID generates a unique auction ID
 func generateAuctionID() string {
 	return fmt.Sprintf("auction_%d", time.Now().Unix())
+}
+
+type regPublicOnly struct {
+	CmIn          frontend.Variable    `gnark:",public"`
+	CAux          [7]frontend.Variable `gnark:",public"`
+	GammaInEnergy frontend.Variable    `gnark:",public"`
+	GammaInCoins  frontend.Variable    `gnark:",public"`
+	Bid           frontend.Variable    `gnark:",public"`
+	Role          frontend.Variable    `gnark:",public"`
+	Quantity      frontend.Variable    `gnark:",public"`
+	G             sw_bls12377.G1Affine `gnark:",public"`
+	G_b           sw_bls12377.G1Affine `gnark:",public"`
+	G_r           sw_bls12377.G1Affine `gnark:",public"`
+}
+
+func (r *regPublicOnly) Define(api frontend.API) error { return nil }
+
+// VerifyRegistrationProof verifies a registration proof using the provided verifying key
+func VerifyRegistrationProof(pub RegistrationPublicInputs, proofBytes []byte, vk groth16.VerifyingKey) error {
+	if len(proofBytes) == 0 {
+		return fmt.Errorf("empty registration proof")
+	}
+
+	// Unmarshal proof
+	proof := groth16.NewProof(ecc.BW6_761)
+	if _, err := proof.ReadFrom(bytes.NewReader(proofBytes)); err != nil {
+		return fmt.Errorf("registration proof unmarshaling failed: %w", err)
+	}
+
+	toAff := func(x, y string) sw_bls12377.G1Affine { return sw_bls12377.G1Affine{X: x, Y: y} }
+
+	assign := &regPublicOnly{
+		CmIn:          pub.CmIn,
+		CAux:          [7]frontend.Variable{pub.CAux[0], pub.CAux[1], pub.CAux[2], pub.CAux[3], pub.CAux[4], pub.CAux[5], pub.CAux[6]},
+		GammaInEnergy: pub.GammaInEnergy,
+		GammaInCoins:  pub.GammaInCoins,
+		Bid:           pub.Bid,
+		Role:          pub.Role,
+		Quantity:      pub.Quantity,
+		G:             toAff(pub.G.X, pub.G.Y),
+		G_b:           toAff(pub.G_b.X, pub.G_b.Y),
+		G_r:           toAff(pub.G_r.X, pub.G_r.Y),
+	}
+
+	witnessPub, err := frontend.NewWitness(assign, ecc.BW6_761.ScalarField(), frontend.PublicOnly())
+	if err != nil {
+		return fmt.Errorf("failed to build public witness: %w", err)
+	}
+
+	return groth16.Verify(proof, vk, witnessPub)
+}
+
+// VerifyExchangeProof verifies an exchange proof using the provided verifying key
+func VerifyExchangeProof(txsOut []*Tx, proofBytes []byte, vk groth16.VerifyingKey) error {
+	if len(txsOut) == 0 {
+		return fmt.Errorf("no output transactions to verify")
+	}
+
+	// Determine participant count from number of output transactions
+	participantCount := len(txsOut)
+
+	// Use rigorous verification with proper circuit witness reconstruction
+	return VerifyExchangeProofRigorous(txsOut, proofBytes, vk, participantCount)
 }
 
 // AppendTx is kept for backward compatibility but should not be used in the new protocol

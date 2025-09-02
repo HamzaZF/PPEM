@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -34,6 +35,9 @@ type RegisterResult struct {
 	// Shared secrets for both encryption mechanisms
 	DHSharedSecret   *bls12377.G1Affine // DH shared secret for DH-OTP
 	ECDHSharedSecret []byte             // ECDH shared secret for ECDH-AES (if applicable)
+
+	// Public inputs used for ledger verification
+	PublicInputs zerocash.RegistrationPublicInputs
 }
 
 // Algorithm 2: Register(n^base, Γ^in, b_i, role, quantity) → (C^Aux, tx^in, info_bid, π_reg)
@@ -72,6 +76,7 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 	energy := note.Value.Energy
 	pkInBytes := pkIn.Bytes()
 
+	fmt.Printf("\x1b[36m  ▪ TX Circuit (10658 constraints)\x1b[0m\n")
 	txIn, err := zerocash.CreateTx(note, skBytes, pkInBytes, coins, energy, participant.Params, ccsTx, pkTx, auctioneerECDHPubKey, participantECDHPrivKey)
 	if err != nil {
 		return nil, errors.New("Algorithm 1 (Transaction) failed: " + err.Error())
@@ -108,6 +113,47 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 		return nil, errors.New("registration proof generation failed: " + err.Error())
 	}
 
+	// Prepare public inputs bundle for ledger verification
+	toStr := func(b *big.Int) string {
+		if b == nil {
+			return "0"
+		}
+		return b.String()
+	}
+	var cAuxStr [7]string
+	for i := 0; i < 7; i++ {
+		cAuxStr[i] = toStr(cAux[i])
+	}
+
+	// Recompute G, G_r for serialization
+	var g1Gen, _, _, _ = bls12377.Generators()
+	var g bls12377.G1Affine
+	g.FromJacobian(&g1Gen)
+	var gr bls12377.G1Affine
+	gr.ScalarMultiplication(&g, rDH.BigInt(new(big.Int)))
+
+	pub := zerocash.RegistrationPublicInputs{
+		CmIn:          new(big.Int).SetBytes(inputCommitment).String(),
+		CAux:          cAuxStr,
+		GammaInCoins:  coins.String(),
+		GammaInEnergy: energy.String(),
+		Bid:           bid.String(),
+		Role:          big.NewInt(int64(role)).String(),
+		Quantity:      big.NewInt(quantity).String(),
+		G: struct {
+			X string
+			Y string
+		}{X: g.X.String(), Y: g.Y.String()},
+		G_b: struct {
+			X string
+			Y string
+		}{X: participant.AuctioneerPub.X.String(), Y: participant.AuctioneerPub.Y.String()},
+		G_r: struct {
+			X string
+			Y string
+		}{X: gr.X.String(), Y: gr.Y.String()},
+	}
+
 	return &RegisterResult{
 		CAux:             cAux,
 		TxIn:             txIn,
@@ -119,6 +165,7 @@ func Register(participant *zerocash.Participant, note *zerocash.Note, bid *big.I
 		PkOut:            pkOut,
 		DHSharedSecret:   &sharedKey,
 		ECDHSharedSecret: nil, // ECDH shared secret is not provided in the original function
+		PublicInputs:     pub,
 	}, nil
 }
 
@@ -199,7 +246,7 @@ func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy,
 		witness.CAux[i] = cAux[i].String()
 	}
 
-	// Create gnark witness and generate proof
+	fmt.Printf("\x1b[36m  ▪ Registration Circuit (9679 constraints)\x1b[0m\n")
 	w, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		return nil, err
@@ -215,6 +262,10 @@ func generateRegistrationProof(note *zerocash.Note, bid *big.Int, coins, energy,
 	if err != nil {
 		return nil, err
 	}
+
+	//// TEMPORARY
+
+	/////
 
 	return buf.Bytes(), nil
 }

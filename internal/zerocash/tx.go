@@ -25,10 +25,10 @@ import (
 	bls12377_fp "github.com/consensys/gnark-crypto/ecc/bls12-377/fp"
 	bls12377_fr "github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
 	mimcNative "github.com/consensys/gnark-crypto/ecc/bw6-761/fr/mimc"
+
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
-	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/std/algebra/native/sw_bls12377"
 )
 
@@ -63,18 +63,22 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 	ccs constraint.ConstraintSystem, pk groth16.ProvingKey, auctioneerECDHPubKey *ecdh.PublicKey, participantECDHPrivKey *ecdh.PrivateKey) (*Tx, error) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("[PANIC RECOVERED] in CreateTx. Witness struct:")
-			fmt.Printf("oldNote: %+v\n", oldNote)
-			fmt.Printf("oldSk: %x\n", oldSk)
-			fmt.Printf("pkNew: %x\n", pkNew)
-			fmt.Printf("value: %v, energy: %v\n", value, energy)
+			if os.Getenv("PPEM_DEBUG_TX") == "1" {
+				fmt.Println("[PANIC RECOVERED] in CreateTx. Witness struct:")
+				fmt.Printf("oldNote: %+v\n", oldNote)
+				fmt.Printf("oldSk: %x\n", oldSk)
+				fmt.Printf("pkNew: %x\n", pkNew)
+				fmt.Printf("value: %v, energy: %v\n", value, energy)
+			}
 		}
 	}()
 	// Step 1: Validate that the secret key corresponds to the note owner
+	// Compare as field elements to avoid byte-length/leading-zero encoding mismatches
 	h := mimcNative.NewMiMC()
 	h.Write(oldSk)
-	expectedPkOwner := h.Sum(nil)
-	if !bytes.Equal(expectedPkOwner, oldNote.PkOwner) {
+	expectedPkOwnerBig := new(big.Int).SetBytes(h.Sum(nil))
+	actualPkOwnerBig := new(big.Int).SetBytes(oldNote.PkOwner)
+	if expectedPkOwnerBig.Cmp(actualPkOwnerBig) != 0 {
 		return nil, fmt.Errorf("secret key does not match note owner")
 	}
 
@@ -205,20 +209,15 @@ func CreateTx(oldNote *Note, oldSk, pkNew []byte, value, energy *big.Int, params
 
 // VerifyTx verifies a Zerocash-like transaction.
 // Steps:
-//  1. Rebuild the circuit and public witness
+//  1. Build the public witness from transaction data
 //  2. Unmarshal the proof
-//  3. Verify the Groth16 proof
+//  3. Verify the Groth16 proof using the verification key
 //
 // Returns an error if verification fails.
+// NOTE: Does NOT compile circuit - uses pre-compiled verification key!
 func VerifyTx(tx *Tx, params *Params, vk groth16.VerifyingKey) error {
-	// Step 1: Rebuild the circuit and public witness
-	var circuit CircuitTx
-	_, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, &circuit)
-	if err != nil {
-		return fmt.Errorf("circuit compilation failed: %w", err)
-	}
-
-	// Step 2: Rebuild the public witness
+	// Step 1: Build the public witness (NO CIRCUIT COMPILATION DURING VERIFICATION!)
+	// The circuit is already compiled and the verification key contains all needed info
 	witness := &CircuitTx{
 		OldCoin:   tx.OldCoin,
 		OldEnergy: tx.OldEnergy,
@@ -241,14 +240,14 @@ func VerifyTx(tx *Tx, params *Params, vk groth16.VerifyingKey) error {
 		return fmt.Errorf("public witness creation failed: %w", err)
 	}
 
-	// Step 3: Unmarshal proof
+	// Step 2: Unmarshal proof
 	proof := groth16.NewProof(ecc.BW6_761)
 	_, err = proof.ReadFrom(bytes.NewReader(tx.Proof))
 	if err != nil {
 		return fmt.Errorf("proof unmarshaling failed: %w", err)
 	}
 
-	// Step 5: Verify the proof
+	// Step 3: Verify the proof
 	if err := groth16.Verify(proof, vk, w); err != nil {
 		return fmt.Errorf("proof verification failed: %w", err)
 	}

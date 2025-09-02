@@ -214,7 +214,6 @@ func ExportAuctionToJSON(
 		return fmt.Errorf("failed to write JSON file: %w", err)
 	}
 
-	fmt.Printf("Auction results exported to JSON: %s\n", filePath)
 	return nil
 }
 

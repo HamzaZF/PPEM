@@ -7,35 +7,26 @@ package zerocash
 
 import (
 	"bytes"
-	"crypto/rand"
 	"math/big"
 
 	bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377"
 	bls12377_fr "github.com/consensys/gnark-crypto/ecc/bls12-377/fr"
 	mimcNative "github.com/consensys/gnark-crypto/ecc/bw6-761/fr/mimc"
+
+	sharedcrypto "implementation/internal/pkg/crypto"
 )
 
 // prf implements a pseudo-random function using MiMC hash.
 // Used for serial number and other protocol PRFs.
 func prf(sk, rho []byte) []byte {
-	h := mimcNative.NewMiMC()
-	h.Write(sk)
-	h.Write(rho)
-	return h.Sum(nil)
+	return sharedcrypto.PRFBytes(sk, rho)
 }
 
 // Commitment creates a commitment to note data using MiMC hash.
 // Follows paper specification: cm = Com(Γ || pk || ρ, r)
 // where Γ = (coins, energy), pk is the public key, ρ is rho, and r is randomness
 func Commitment(coins, energy *big.Int, pk []byte, rho, r *big.Int) []byte {
-	h := mimcNative.NewMiMC()
-	// Commit to Γ || pk || ρ with randomness r
-	h.Write(coins.Bytes())  // Γ.coins
-	h.Write(energy.Bytes()) // Γ.energy
-	h.Write(pk)             // pk (public key)
-	h.Write(rho.Bytes())    // ρ (rho)
-	h.Write(r.Bytes())      // r (randomness)
-	return h.Sum(nil)
+	return sharedcrypto.Commitment(coins, energy, pk, rho, r)
 }
 
 // mimcHash computes MiMC hash of input bytes.
@@ -47,9 +38,7 @@ func mimcHash(data []byte) []byte {
 
 // randomBytes generates random bytes of specified length using crypto/rand.
 func randomBytes(n int) []byte {
-	b := make([]byte, n)
-	rand.Read(b)
-	return b
+	return sharedcrypto.RandomBytes(n)
 }
 
 // RandomBytes is a public wrapper for randomBytes.
@@ -87,7 +76,7 @@ func ComputeDHShared(sk *bls12377_fr.Element, pk *bls12377.G1Affine) *bls12377.G
 // Returns an array of encrypted fields (pkOwner, coins, energy, rho, rand, cm).
 func EncryptNoteWithSharedKey(note *Note, shared *bls12377.G1Affine) [6][]byte {
 	// Use the same MiMC-based mask chain as buildEncMimc, but output as []byte
-	h := mimcNative.NewMiMC()
+	h := sharedcrypto.NewMiMC()
 	encKeyX := shared.X.Bytes()
 	encKeyY := shared.Y.Bytes()
 	h.Write(encKeyX[:])
@@ -135,7 +124,7 @@ func EncryptNoteWithSharedKey(note *Note, shared *bls12377.G1Affine) [6][]byte {
 // DecryptNoteWithSharedKey decrypts note fields using MiMC and the shared key.
 // Returns the decrypted fields in the same order as EncryptNoteWithSharedKey.
 func DecryptNoteWithSharedKey(enc [6][]byte, shared *bls12377.G1Affine) (fields [6][]byte, err error) {
-	h := mimcNative.NewMiMC()
+	h := sharedcrypto.NewMiMC()
 	encKeyX := shared.X.Bytes()
 	encKeyY := shared.Y.Bytes()
 	h.Write(encKeyX[:])
@@ -224,7 +213,7 @@ func NewMiMC() interface {
 	Sum([]byte) []byte
 	Reset()
 } {
-	return mimcNative.NewMiMC()
+	return sharedcrypto.NewMiMC()
 }
 
 // MimcHashPublic is a wrapper for testing
@@ -235,10 +224,7 @@ func MimcHashPublic(data []byte) *big.Int {
 
 // SerialNumber computes a serial number from secret key and rho
 func SerialNumber(sk, rho []byte) []byte {
-	h := mimcNative.NewMiMC()
-	h.Write(sk)
-	h.Write(rho)
-	return h.Sum(nil)
+	return sharedcrypto.PRFBytes(sk, rho)
 }
 
 // RandomBytesPublic generates random bytes (exposed for testing)

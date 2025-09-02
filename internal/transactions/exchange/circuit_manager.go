@@ -18,8 +18,12 @@
 package exchange
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
@@ -28,14 +32,24 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 )
 
+const circuitCacheVersion = "v1"
+
+type circuitMeta struct {
+	Version          string    `json:"version"`
+	ParticipantCount int       `json:"participant_count"`
+	Curve            string    `json:"curve"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 // CircuitKeyManager provides dynamic circuit key management for any N participants.
 // Implements thread-safe caching to avoid recompiling circuits for the same participant count.
 //
 // Thread safety: All operations are protected by read-write mutex for concurrent access.
 // Cache management: Automatically caches compiled circuits by participant count.
 type CircuitKeyManager struct {
-	mu    sync.RWMutex         // Read-write mutex for thread-safe cache access
-	cache map[int]*CircuitKeys // Cache mapping participant count to compiled circuit keys
+	mu       sync.RWMutex         // Read-write mutex for thread-safe cache access
+	cache    map[int]*CircuitKeys // Cache mapping participant count to compiled circuit keys
+	cacheDir string               // Filesystem cache directory for keys
 }
 
 // CircuitKeys holds proving and verifying keys for a specific participant count.
@@ -57,7 +71,114 @@ type CircuitKeys struct {
 // Returns a thread-safe manager ready for circuit key generation and caching.
 func NewCircuitKeyManager() *CircuitKeyManager {
 	return &CircuitKeyManager{
-		cache: make(map[int]*CircuitKeys),
+		cache:    make(map[int]*CircuitKeys),
+		cacheDir: ".ppem_cache/circuits",
+	}
+}
+
+// helper: ensure cache dir exists
+func (cm *CircuitKeyManager) ensureCacheDir() error {
+	if cm.cacheDir == "" {
+		return nil
+	}
+	return os.MkdirAll(cm.cacheDir, 0755)
+}
+
+func (cm *CircuitKeyManager) keyPaths(n int) (pkPath, vkPath, ccsPath, metaPath string) {
+	base := filepath.Join(cm.cacheDir, fmt.Sprintf("N_%d", n))
+	return base + ".pk", base + ".vk", base + ".ccs", base + ".meta.json"
+}
+
+func (cm *CircuitKeyManager) loadKeysFromDisk(n int) (groth16.ProvingKey, groth16.VerifyingKey, bool) {
+	if err := cm.ensureCacheDir(); err != nil {
+		return nil, nil, false
+	}
+	pkPath, vkPath, _, _ := cm.keyPaths(n)
+	pkFile, err := os.Open(pkPath)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer pkFile.Close()
+	vkFile, err := os.Open(vkPath)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer vkFile.Close()
+
+	pk := groth16.NewProvingKey(ecc.BW6_761)
+	if _, err := pk.ReadFrom(pkFile); err != nil {
+		return nil, nil, false
+	}
+	vk := groth16.NewVerifyingKey(ecc.BW6_761)
+	if _, err := vk.ReadFrom(vkFile); err != nil {
+		return nil, nil, false
+	}
+	return pk, vk, true
+}
+
+func (cm *CircuitKeyManager) saveKeysToDisk(n int, pk groth16.ProvingKey, vk groth16.VerifyingKey) {
+	if err := cm.ensureCacheDir(); err != nil {
+		return
+	}
+	pkPath, vkPath, _, _ := cm.keyPaths(n)
+	if f, err := os.Create(pkPath); err == nil {
+		_, _ = pk.WriteTo(f)
+		_ = f.Close()
+	}
+	if f, err := os.Create(vkPath); err == nil {
+		_, _ = vk.WriteTo(f)
+		_ = f.Close()
+	}
+}
+
+func (cm *CircuitKeyManager) loadCCSFromDisk(n int) (constraint.ConstraintSystem, bool) {
+	if err := cm.ensureCacheDir(); err != nil {
+		return nil, false
+	}
+	_, _, ccsPath, metaPath := cm.keyPaths(n)
+	// validate meta version
+	metaBytes, err := os.ReadFile(metaPath)
+	if err != nil {
+		return nil, false
+	}
+	var meta circuitMeta
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		return nil, false
+	}
+	if meta.Version != circuitCacheVersion || meta.ParticipantCount != n || meta.Curve != "BW6_761" {
+		return nil, false
+	}
+	f, err := os.Open(ccsPath)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	cs := groth16.NewCS(ecc.BW6_761)
+	if _, err := cs.ReadFrom(f); err != nil {
+		return nil, false
+	}
+	return cs, true
+}
+
+func (cm *CircuitKeyManager) saveCCSToDisk(n int, ccs constraint.ConstraintSystem) {
+	if err := cm.ensureCacheDir(); err != nil {
+		return
+	}
+	_, _, ccsPath, metaPath := cm.keyPaths(n)
+	// write CCS
+	if f, err := os.Create(ccsPath); err == nil {
+		_, _ = ccs.WriteTo(f)
+		_ = f.Close()
+	}
+	// write meta
+	meta := circuitMeta{
+		Version:          circuitCacheVersion,
+		ParticipantCount: n,
+		Curve:            "BW6_761",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if b, err := json.MarshalIndent(meta, "", "  "); err == nil {
+		_ = os.WriteFile(metaPath, b, 0644)
 	}
 }
 
@@ -101,13 +222,29 @@ func (cm *CircuitKeyManager) GetOrCreateCircuitKeys(n int) (*CircuitKeys, error)
 		return keys, nil
 	}
 
-	// Create new circuit for N participants
-	circuit := NewCircuitTxFN(n)
+	// Try to load CCS and keys from disk cache first
+	if ccsDisk, ok := cm.loadCCSFromDisk(n); ok {
+		if pkDisk, vkDisk, ok2 := cm.loadKeysFromDisk(n); ok2 {
+			keys := &CircuitKeys{ProvingKey: pkDisk, VerifyingKey: vkDisk, ConstraintSystem: ccsDisk, ParticipantCount: n}
+			cm.cache[n] = keys
+			return keys, nil
+		}
+	}
 
-	// Compile the circuit using BW6-761 curve and R1CS builder
+	// Fallback: compile the circuit using BW6-761 curve and R1CS builder
+	circuit := NewCircuitTxFN(n)
 	ccs, err := frontend.Compile(ecc.BW6_761.ScalarField(), r1cs.NewBuilder, circuit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile circuit for %d participants: %w", n, err)
+	}
+
+	// Try to load keys from disk (if CCS was missing but keys existed)
+	if pkDisk, vkDisk, ok := cm.loadKeysFromDisk(n); ok {
+		keys := &CircuitKeys{ProvingKey: pkDisk, VerifyingKey: vkDisk, ConstraintSystem: ccs, ParticipantCount: n}
+		// Ensure CCS is now saved for next time
+		cm.saveCCSToDisk(n, ccs)
+		cm.cache[n] = keys
+		return keys, nil
 	}
 
 	// Generate proving and verifying keys using Groth16
@@ -115,6 +252,10 @@ func (cm *CircuitKeyManager) GetOrCreateCircuitKeys(n int) (*CircuitKeys, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup keys for %d participants: %w", n, err)
 	}
+
+	// Save to disk cache (best-effort)
+	cm.saveCCSToDisk(n, ccs)
+	cm.saveKeysToDisk(n, pk, vk)
 
 	// Create and cache the keys
 	keys := &CircuitKeys{

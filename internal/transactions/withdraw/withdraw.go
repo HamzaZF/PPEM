@@ -85,6 +85,7 @@ func Withdraw(
 		return nil, nil, fmt.Errorf("witness is nil")
 	}
 
+	fmt.Printf("\x1b[31m  ▪ Withdrawal Circuit (6364 constraints)\x1b[0m\n")
 	gnarkWitness, err := frontend.NewWitness(witness, ecc.BW6_761.ScalarField())
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewWitness failed: %v", err)

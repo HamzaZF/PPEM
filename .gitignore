@@ -1,0 +1,55 @@
+# ----------------------------
+# Build Caches
+# ----------------------------
+# Rust build artifacts
+/risc0/target/
+
+# PPEM cache
+/.ppem_cache/
+
+# Circom/Gnark test cache (not used in production)
+/out/circom_cache/
+
+# ----------------------------
+# Generated Test Data
+# ----------------------------
+# Exchange data from test runs
+/exchange_data/PPEM_N10_Buyers50%_*.json
+/exchange_data/PPEM_N*_Buyers*_*.json
+
+# Generated graphs
+/graphs/PPEM_N10_Buyers50%_*.svg
+/graphs/PPEM_N*_Buyers*_*.svg
+
+# Ledger output
+/ledger_final.json
+
+# ----------------------------
+# Runtime Generated Files
+# ----------------------------
+# Circom runtime files
+/circom/input.json
+/circom/proof.json
+/circom/public.json
+/circom/vkey.json
+/circom/witness.wtns
+
+# Large proving key (3.6GB - too large for Git LFS)
+# Users should generate this locally or download separately
+/circom/stark_verify_final.zkey
+
+# RISC Zero runtime files
+/risc0/input.json
+/risc0/risc0_receipt.bin
+/risc0/risc0_receipt.json
+/risc0/gnark_inputs.json
+/risc0/auction_scenario.json
+/risc0/auction_scenario_*.json
+
+# ----------------------------
+# Note: Large binaries and proving keys are tracked with Git LFS
+# See .gitattributes for LFS-tracked files:
+# - circom/stark_verify (142MB binary)
+# - circom/prover (500KB binary)
+# - circom/stark_verify_final.zkey (3.6GB proving key)
+# ----------------------------

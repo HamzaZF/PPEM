@@ -1,0 +1,11 @@
+{
+  "cargo_path": "cargo",
+  "circom_path": "circom",
+  "stark_verify_path": "./circom/stark_verify",
+  "prover_path": "./circom/prover",
+  "node_path": "node",
+  "snarkjs_path": "snarkjs",
+  "python_path": "python3",
+  "risc0_dir": "./risc0",
+  "circom_dir": "./circom"
+}
