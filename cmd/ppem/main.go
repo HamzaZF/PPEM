@@ -280,7 +280,6 @@ type CircuitKeys struct {
 
 func main() {
 	// Parse command-line flags
-	var numParticipants int
 	var scenarioFile string
 	var verbose bool
 	var quiet bool
@@ -288,8 +287,7 @@ func main() {
 	var withdrawAll bool
 	var withdrawListStr string
 
-	flag.IntVar(&numParticipants, "n", 10, "Number of participants (positive integer)")
-	flag.StringVar(&scenarioFile, "scenario", "", "Path to auction scenario JSON file (default: risc0/auction_scenario_N{participants}.json)")
+	flag.StringVar(&scenarioFile, "scenario", "", "Path to auction scenario JSON file (required)")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output (equivalent to -verbosity=debug)")
 	flag.BoolVar(&quiet, "quiet", false, "Suppress informational output (equivalent to -verbosity=quiet)")
 	flag.StringVar(&verbosity, "verbosity", "info", "Verbosity level: quiet, info, debug, trace")
@@ -309,26 +307,17 @@ func main() {
 		// Continue with defaults
 	}
 
-	// Validate input parameters
-	if numParticipants <= 0 {
-		printError("Invalid Configuration", fmt.Sprintf("Participants must be positive, got %d", numParticipants))
+	// Validate that scenario file is provided
+	if scenarioFile == "" {
+		printError("Invalid Configuration", "Scenario file is required. Use -scenario flag or generate one with: python3 generate_auction_scenario.py N")
 	}
 
 	startTime := time.Now()
 
 	// STEP 1: Load market scenario from JSON file
-	if scenarioFile == "" {
-		scenarioFile = fmt.Sprintf("risc0/auction_scenario_N%d.json", numParticipants)
-	}
 	config, err := loadScenarioFromJSON(scenarioFile)
 	if err != nil {
-		if scenarioFile == fmt.Sprintf("risc0/auction_scenario_N%d.json", numParticipants) {
-			// Default file - suggest generation
-			printError("Scenario Loading", fmt.Sprintf("Failed to load %s: %s\nGenerate it first: python3 generate_auction_scenario.py %d", scenarioFile, err.Error(), numParticipants))
-		} else {
-			// Custom file - just show the error
-			printError("Scenario Loading", fmt.Sprintf("Failed to load %s: %s", scenarioFile, err.Error()))
-		}
+		printError("Scenario Loading", fmt.Sprintf("Failed to load %s: %s", scenarioFile, err.Error()))
 	}
 
 	// Set the scenario file path for RISC Zero to use
@@ -369,8 +358,7 @@ func main() {
 		printError("Configuration", err.Error())
 	}
 
-	// Update numParticipants to match the loaded scenario
-	numParticipants = config.NumParticipants
+	// Participant count is determined from loaded scenario
 
 	// PHASE 1: SETUP
 	if !quiet {

@@ -14,7 +14,7 @@ fi
 
 # Compile Circom to C++
 echo "Compiling stark_verify.circom to C++..."
-circom risc0/stark_verify.circom --c $EXTRA_FLAGS --output circom/
+circom risc0/stark_verify.circom --r1cs --sym --c $EXTRA_FLAGS --output circom/
 
 # Build the witness generator
 echo "Building C++ witness generator..."

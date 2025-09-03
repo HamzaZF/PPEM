@@ -2,23 +2,26 @@
 # Complete system dependencies installation script
 set -e
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Source common utilities
+source "$(dirname "$0")/common.sh"
 
-# Version requirements
-GO_MIN_VERSION="1.21"
-NODE_MIN_VERSION="16"
-RUST_MIN_VERSION="1.70"
-SNARKJS_VERSION="0.7.3"
-CIRCOM_VERSION="2.1.6"
+# Parse arguments
+AUTO_YES=false
 
-echo -e "${BLUE}═══════════════════════════════════════════${NC}"
-echo -e "${BLUE}   PPEM System Dependencies Installer      ${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════${NC}"
-echo ""
+for arg in "$@"; do
+    case $arg in
+        --auto-yes) AUTO_YES=true ;;
+        --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --auto-yes        Skip confirmation prompt"
+            echo "  --help            Show this help"
+            exit 0
+            ;;
+    esac
+done
+
+print_completion "PPEM System Dependencies Installer"
 
 # Detect OS
 detect_os() {
@@ -51,14 +54,11 @@ detect_arch() {
     echo "Detected architecture: $ARCH"
 }
 
-# Version comparison
-version_ge() {
-    [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
-}
+# Version comparison function now provided by common.sh
 
 # Install system packages
 install_system_packages() {
-    echo -e "\n${YELLOW}Installing system packages...${NC}"
+    print_status "info" "Installing system packages..."
     
     case $OS in
         debian)
@@ -112,29 +112,30 @@ install_system_packages() {
                 jq
             ;;
         *)
-            echo -e "${RED}Unsupported OS. Please install dependencies manually.${NC}"
+            print_status "error" "Unsupported OS. Please install dependencies manually."
             exit 1
             ;;
     esac
     
-    echo -e "${GREEN}✓ System packages installed${NC}"
+    print_status "success" "System packages installed"
 }
 
 # Install Go
 install_go() {
-    echo -e "\n${YELLOW}Checking Go installation...${NC}"
+    print_status "info" "Checking Go installation..."
     
-    if command -v go &> /dev/null; then
-        GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-        if version_ge "$GO_VERSION" "$GO_MIN_VERSION"; then
-            echo -e "${GREEN}✓ Go $GO_VERSION already installed${NC}"
-            return
-        else
-            echo "Go version $GO_VERSION is too old (need >= $GO_MIN_VERSION)"
-        fi
+    if check_tool_version "go" "$GO_MIN_VERSION"; then
+        local version=$(get_tool_version "go")
+        print_status "success" "Go $version already installed"
+        return
     fi
     
-    echo "Installing Go..."
+    if command_exists go; then
+        local version=$(get_tool_version "go")
+        print_status "warning" "Go version $version is too old (need >= $GO_MIN_VERSION)"
+    fi
+    
+    print_status "info" "Installing Go..."
     GO_VERSION="1.23.3"
     GO_FILE="go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
     
@@ -147,41 +148,39 @@ install_go() {
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
     export PATH=$PATH:/usr/local/go/bin
     
-    echo -e "${GREEN}✓ Go ${GO_VERSION} installed${NC}"
+    print_status "success" "Go ${GO_VERSION} installed"
 }
 
 # Install Rust
 install_rust() {
-    echo -e "\n${YELLOW}Checking Rust installation...${NC}"
+    print_status "info" "Checking Rust installation..."
     
-    if command -v cargo &> /dev/null; then
-        RUST_VERSION=$(rustc --version | awk '{print $2}')
-        if version_ge "$RUST_VERSION" "$RUST_MIN_VERSION"; then
-            echo -e "${GREEN}✓ Rust $RUST_VERSION already installed${NC}"
-            return
-        fi
+    if check_tool_version "cargo" "$RUST_MIN_VERSION"; then
+        local version=$(get_tool_version "cargo")
+        print_status "success" "Rust $version already installed"
+        return
     fi
     
-    echo "Installing Rust..."
+    print_status "info" "Installing Rust..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
     
-    echo -e "${GREEN}✓ Rust installed${NC}"
+    print_status "success" "Rust installed"
 }
 
 # Install Node.js
 install_nodejs() {
-    echo -e "\n${YELLOW}Checking Node.js installation...${NC}"
+    print_status "info" "Checking Node.js installation..."
     
-    if command -v node &> /dev/null; then
-        NODE_VERSION=$(node --version | sed 's/v//' | cut -d. -f1)
+    if command_exists node; then
+        NODE_VERSION=$(get_tool_version "node" | cut -d. -f1)
         if [ "$NODE_VERSION" -ge "$NODE_MIN_VERSION" ]; then
-            echo -e "${GREEN}✓ Node.js $(node --version) already installed${NC}"
+            print_status "success" "Node.js $(node --version) already installed"
             return
         fi
     fi
     
-    echo "Installing Node.js..."
+    print_status "info" "Installing Node.js..."
     if [ "$OS" = "debian" ]; then
         curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
         sudo apt-get install -y nodejs
@@ -195,87 +194,46 @@ install_nodejs() {
         nvm use 20
     fi
     
-    echo -e "${GREEN}✓ Node.js installed${NC}"
+    print_status "success" "Node.js installed"
 }
 
 # Install Circom
 install_circom() {
-    echo -e "\n${YELLOW}Checking Circom installation...${NC}"
+    print_status "info" "Checking Circom installation..."
     
-    if command -v circom &> /dev/null; then
-        echo -e "${GREEN}✓ Circom already installed${NC}"
+    if command_exists circom; then
+        print_status "success" "Circom already installed"
         return
     fi
     
-    echo "Installing Circom..."
+    print_status "info" "Installing Circom..."
     CIRCOM_FILE="circom-${OS}-${ARCH}"
     curl -L "https://github.com/iden3/circom/releases/download/v${CIRCOM_VERSION}/${CIRCOM_FILE}" -o circom
     chmod +x circom
     sudo mv circom /usr/local/bin/
     
-    echo -e "${GREEN}✓ Circom ${CIRCOM_VERSION} installed${NC}"
+    print_status "success" "Circom ${CIRCOM_VERSION} installed"
 }
 
 # Install SnarkJS
 install_snarkjs() {
-    echo -e "\n${YELLOW}Checking SnarkJS installation...${NC}"
+    print_status "info" "Checking SnarkJS installation..."
     
-    if command -v snarkjs &> /dev/null; then
-        echo -e "${GREEN}✓ SnarkJS already installed${NC}"
+    if command_exists snarkjs; then
+        print_status "success" "SnarkJS already installed"
         return
     fi
     
-    echo "Installing SnarkJS..."
+    print_status "info" "Installing SnarkJS..."
     npm install -g snarkjs@${SNARKJS_VERSION}
     
-    echo -e "${GREEN}✓ SnarkJS ${SNARKJS_VERSION} installed${NC}"
+    print_status "success" "SnarkJS ${SNARKJS_VERSION} installed"
 }
 
-# Setup Git LFS
-setup_git_lfs() {
-    echo -e "\n${YELLOW}Setting up Git LFS...${NC}"
-    
-    git lfs install
-    
-    echo -e "${GREEN}✓ Git LFS configured${NC}"
-}
 
-# Verify installation
+# Verify installation (now uses shared function)
 verify_installation() {
-    echo -e "\n${BLUE}Verifying installation...${NC}"
-    echo "------------------------"
-    
-    ERRORS=0
-    
-    # Check each tool
-    check_tool() {
-        if command -v "$1" &> /dev/null; then
-            echo -e "${GREEN}✓${NC} $1: $($1 --version 2>&1 | head -n1)"
-        else
-            echo -e "${RED}✗${NC} $1 not found"
-            ERRORS=$((ERRORS + 1))
-        fi
-    }
-    
-    check_tool "go"
-    check_tool "cargo"
-    check_tool "node"
-    check_tool "npm"
-    check_tool "circom"
-    check_tool "snarkjs"
-    check_tool "git"
-    check_tool "make"
-    check_tool "cmake"
-    
-    echo "------------------------"
-    
-    if [ $ERRORS -eq 0 ]; then
-        echo -e "${GREEN}All dependencies installed successfully!${NC}"
-        return 0
-    else
-        echo -e "${RED}$ERRORS dependencies missing or failed to install${NC}"
-        return 1
-    fi
+    verify_core_tools
 }
 
 # Main installation flow
@@ -283,7 +241,7 @@ main() {
     detect_os
     detect_arch
     
-    echo -e "\n${BLUE}This will install:${NC}"
+    print_status "info" "This will install:"
     echo "• System packages (build tools, libraries)"
     echo "• Go ${GO_MIN_VERSION}+"
     echo "• Rust/Cargo ${RUST_MIN_VERSION}+"
@@ -292,11 +250,13 @@ main() {
     echo "• SnarkJS ${SNARKJS_VERSION}"
     echo ""
     
-    read -p "Continue with installation? (y/n) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled"
-        exit 0
+    if [ "$AUTO_YES" = false ]; then
+        if ! ask_yes_no "Continue with installation?"; then
+            echo "Installation cancelled"
+            exit 0
+        fi
+    else
+        print_status "info" "Auto-proceeding with installation..."
     fi
     
     install_system_packages
@@ -305,19 +265,15 @@ main() {
     install_nodejs
     install_circom
     install_snarkjs
-    setup_git_lfs
     
     echo ""
     verify_installation
     
-    echo -e "\n${GREEN}═══════════════════════════════════════════${NC}"
-    echo -e "${GREEN}   Installation Complete!                   ${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════${NC}"
+    print_completion "Installation Complete!"
     echo ""
     echo "Next steps:"
     echo "1. Reload your shell: source ~/.bashrc"
     echo "2. Run setup: ./scripts/setup.sh"
-    echo "3. Build the project: go build -o ppem ./cmd/ppem"
 }
 
 # Run main

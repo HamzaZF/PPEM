@@ -11,10 +11,10 @@ from typing import List, Dict, Tuple
 import sys
 
 class AuctionScenarioGenerator:
-    def __init__(self, num_participants: int, buyer_ratio: float = 0.5):
+    def __init__(self, num_participants: int):
         self.num_participants = num_participants
-        self.buyer_ratio = buyer_ratio
-        self.num_buyers = int(num_participants * buyer_ratio)
+        self.buyer_ratio = 0.5  # Fixed at 50% buyers
+        self.num_buyers = int(num_participants * self.buyer_ratio)
         self.num_sellers = num_participants - self.num_buyers
         
         # Ensure at least one of each type
@@ -220,7 +220,6 @@ class AuctionScenarioGenerator:
 def main():
     parser = argparse.ArgumentParser(description='Generate realistic auction scenarios for PPEM')
     parser.add_argument('participants', type=int, help='Number of participants')
-    parser.add_argument('--buyer-ratio', type=float, default=0.5, help='Ratio of buyers (0.0-1.0, default: 0.5)')
     parser.add_argument('--output', '-o', type=str, help='Output filename (default: auction_scenario_N{participants}.json)')
     parser.add_argument('--name', type=str, help='Scenario name (default: Generated_PPEM_Auction_N{participants})')
     parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
@@ -233,10 +232,6 @@ def main():
         print("Error: Number of participants must be at least 2")
         sys.exit(1)
     
-    if not 0.0 <= args.buyer_ratio <= 1.0:
-        print("Error: Buyer ratio must be between 0.0 and 1.0")
-        sys.exit(1)
-    
     # Set random seed if provided
     if args.seed:
         random.seed(args.seed)
@@ -246,8 +241,8 @@ def main():
     output_file = args.output or f"auction_scenario_N{args.participants}.json"
     scenario_name = args.name or f"Generated_PPEM_Auction_N{args.participants}"
     
-    # Generate scenario
-    generator = AuctionScenarioGenerator(args.participants, args.buyer_ratio)
+    # Generate scenario (fixed 50% buyer ratio)
+    generator = AuctionScenarioGenerator(args.participants)
     scenario = generator.generate_scenario(scenario_name)
     
     # Save scenario
